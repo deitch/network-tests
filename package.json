@@ -2,7 +2,7 @@
   "name": "network-tests",
   "version": "1.0.0",
   "description": "Set up for network performance tests, run them and tear down",
-  "main": "run-tests.js",
+  "main": "run.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
