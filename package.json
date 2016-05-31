@@ -1,0 +1,22 @@
+{
+  "name": "network-tests",
+  "version": "1.0.0",
+  "description": "Set up for network performance tests, run them and tear down",
+  "main": "run-tests.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Avi Deitcher https://github.com/deitch",
+  "license": "MIT",
+  "dependencies": {
+    "async": "^2.0.0-rc.5",
+    "jsonfile": "^2.3.1",
+    "keypair": "^1.0.0",
+    "lodash": "^4.13.1",
+    "minimist": "^1.2.0",
+    "node-forge": "^0.6.39",
+    "packet-api": "packethost/packet-nodejs",
+    "request": "^2.72.0",
+    "simple-ssh": "^0.9.0"
+  }
+}
