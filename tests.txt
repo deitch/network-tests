@@ -1,0 +1,56 @@
+These are the tests to run and how to set them up.
+
+With each one, repeat for:
+	types: 1 & 3
+	protocols: tcp & udp
+	packet sizes: 300, 500, 1024, 2048
+
+Bare metal:
+	local: source process on target1 -> target process on target1
+	remote: source process on source1 -> target container on target1
+
+Host networking:
+	local: source container on source1 -> target container on source1 
+	remote: source container on source1 -> target container on target1 
+
+Bridge NAT (default docker network):
+	local: source container on source1 -> target container on source1 
+	remote: source container on source1 -> target container on target1 
+
+Bridge without NAT:
+	local: source container on source1 -> target container on source1 
+	remote: source container on source1 -> target container on target1 
+
+MacVlan:
+	local: source container on source1 -> target container on source1 
+	remote: source container on source1 -> target container on target1 
+
+SR-IOV:
+	local: source container on source1 -> target container on source1
+	remote: source container on source1 -> target container on target1
+
+Weave:
+	local: source container on source1 -> target container on source1
+	remote: source container on source1 -> target container on target1
+
+Flannel:
+	local: source container on source1 -> target container on source1
+	remote: source container on source1 -> target container on target1
+	
+Calico:
+	local: source container on source1 -> target container on source1
+	remote: source container on source1 -> target container on target1
+
+Weave:
+	local: source container on source1 -> target container on source1
+	remote: source container on source1 -> target container on target1
+
+
+Summary:
+	10 categories of tests: 8 = bare metal benchmark
+	2 tests in each category
+	2 server types
+	2 protocols
+	4 packet sizes
+		10 categories * 2 tests in each category * 2 server types * 2 protocols * 4 packet sizes = 320 tests
+
