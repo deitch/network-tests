@@ -49,6 +49,8 @@ PROJDATE = new Date().toISOString(),
 projName = "ULL-network-performance-test-"+PROJDATE,
 SIZES = [300,500,1024,2048],
 PROTOCOLS = ['TCP','UDP'],
+
+// THIS MUST BE REPLACED BY LISTING THE DIRECTORIES!
 TESTS = ["metal","bridge","host"],
 NETWORKS = ["local","remote"],
 CHECKDELAY = 30,
@@ -95,11 +97,8 @@ const genTestList = function (params) {
 	return tests;
 },
 
-startReflectors = function (targets,startCmd,ipCmd,callback) {
-	if (callback === undefined && typeof(ipCmd) === "function") {
-		callback = ipCmd;
-		ipCmd = null;
-	}
+
+startReflectors = function (targets,test,callback) {
 	let targetIds = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
@@ -111,7 +110,8 @@ startReflectors = function (targets,startCmd,ipCmd,callback) {
 			key: pair.private
 		});
 		// start the netserver container
-		session.exec(startCmd,{
+		log(`network-tests/tests/${test}/start-reflector.sh ${NETSERVERPORT} ${NETSERVERDATAPORT}`);
+		session.exec(`network-tests/tests/${test}/start-reflector.sh ${NETSERVERPORT} ${NETSERVERDATAPORT}`,{
 			exit: function (code,stdout) {
 				if (code !== 0) {
 					errCode = true;
@@ -120,24 +120,7 @@ startReflectors = function (targets,startCmd,ipCmd,callback) {
 				} else {
 					targetIds[target].id = stdout.replace(/\n/,'').replace(/\s+/,'');
 				}
-				// do we have an IP command?
-				if (ipCmd) {
-					session.exec(ipCmd,{
-						exit: function (code,stdout) {
-							if (code !== 0) {
-								errCode = true;
-								session.end();
-								cb(target+": Failed to get netserver IP");
-							} else {
-								// if it has no IP, go for localhost
-								let ip = stdout.replace(/\n/,'').replace(/\s+/,'');
-								targetIds[target].ip = ip && ip !== "" ? ip : 'localhost';
-							}
-						}
-					});
-				} else {
-					targetIds[target].ip = devices[target].ip_private_mgmt;
-				}
+				targetIds[target].ip = devices[target].ip_private_mgmt;
 			}
 		});
 		session.on('error',function (err) {
@@ -161,12 +144,57 @@ startReflectors = function (targets,startCmd,ipCmd,callback) {
 		}
 	});
 },
-runTests = function (tests,targets,msgPrefix,cmdPrefix,callback) {
+
+getReflectorIp = function (targets,test,callback) {
+	let targetIds = {};
+	// now start the reflector on each
+	async.each(targets,function (target,cb) {
+		let errCode = false;
+		targetIds[target] = {};
+		var session = new ssh({
+			host: devices[target].ip_public.address,
+			user: "root",
+			key: pair.private
+		});
+		// get the reflector IP
+
+		session.exec(`network-tests/tests/${test}/get-reflector-ip.sh`,{
+			exit: function (code,stdout) {
+				if (code !== 0) {
+					errCode = true;
+					session.end();
+					cb(target+": Failed to get netserver IP");
+				} else {
+					// if it has no IP, go for localhost
+					let ip = stdout.replace(/\n/,'').replace(/\s+/,'');
+					targetIds[target].ip = ip && ip !== "" ? ip : 'localhost';
+				}
+			}
+		});
+		session.on('error',function (err) {
+			log(target+": ssh error connecting to start netserver");
+			log(err);
+			session.end();
+			cb(target+": ssh connection failed");
+		});
+		session.on('close',function (hadError) {
+			if (!hadError && !errCode) {
+				log(target+": retrieved netserver IP "+targetIds[target].ip);
+				cb(null);
+			}
+		});
+		session.start();
+	},function (err) {
+		if(err) {
+			callback(err);
+		} else {
+			callback(null,targetIds);
+		}
+	});
+},
+
+runTests = function (tests,targets,msgPrefix,callback) {
 	// this must be run in series so they don't impact each other
-	if (callback === undefined && typeof(cmdPrefix) === "function") {
-		callback = cmdPrefix;
-		cmdPrefix = "";
-	}
 	async.mapSeries(tests,function (t,cb) {
 		let msg = msgPrefix+" test: "+t.type+" "+t.protocol+" "+t.size, output,
 		target = t.type === "remote" ? devices[t.to].ip_private_mgmt : targets[t.to].ip,
@@ -177,8 +205,8 @@ runTests = function (tests,targets,msgPrefix,cmdPrefix,callback) {
 			host: devices[t.from].ip_public.address,
 			user: "root",
 			key: pair.private
-		}), cmd = cmdPrefix+'netperf  -P 0 -H '+target+' -c -t '+t.protocol+'_RR -l -'+t.reps+' -v 2 -p '+t.port+' -- -k -r '+t.size+','+t.size+' -P '+NETSERVERLOCALPORT+','+NETSERVERDATAPORT;
-		//log(dockerCmd);
+		}), 
+		cmd = `network-tests/tests/${t.test}/run-test.sh  ${target} ${t.protocol} ${t.reps} ${t.port} ${t.size} ${NETSERVERLOCALPORT} ${NETSERVERDATAPORT}`;
 		session.exec(cmd, {
 			exit: function (code,stdout) {
 				if (code !== 0) {
@@ -208,7 +236,7 @@ runTests = function (tests,targets,msgPrefix,cmdPrefix,callback) {
 	},callback);
 },
 
-stopReflectors = function (targets,cmd,callback) {
+stopReflectors = function (targets,test,callback) {
 	// stop the netserver reflectors
 	async.each(_.keys(targets),function (target,cb) {
 		let errCode = false;
@@ -218,7 +246,7 @@ stopReflectors = function (targets,cmd,callback) {
 			key: pair.private
 		});
 		// stop the netserver container
-		session.exec(cmd,{
+		session.exec(`network-tests/tests/${test}/stop-reflector.sh`,{
 			exit: function (code) {
 				if (code !== 0) {
 					errCode = true;
@@ -243,6 +271,7 @@ stopReflectors = function (targets,cmd,callback) {
 	},callback);
 },
 
+
 runHostTests = function (tests,callback) {
 	// find all of the targets
 	let targets = _.uniq(_.map(tests,"to")), targetIds = {}, allResults;
@@ -253,7 +282,7 @@ runHostTests = function (tests,callback) {
 	// 3- stop reflectors
 	async.waterfall([
 		function (cb) {
-			startReflectors(targets,'netserver -p '+NETSERVERPORT+' >/dev/null && pgrep netserver',cb);
+			startReflectors(targets,'metal',cb);
 		},
 		function (res,cb) {
 			targetIds = res;
@@ -261,18 +290,18 @@ runHostTests = function (tests,callback) {
 		},
 		function (res,cb) {
 			allResults = res;
-			stopReflectors(targetIds,"pkill netserver",cb);
+			stopReflectors(targetIds,"metal",cb);
 		}
 	],function (err) {
 		callback(err,allResults);
 	});
 },
 
-runContainerTests = function (tests,nettype,callback) {
+runContainerTests = function (tests,test,callback) {
 	// need to start the reflector container on each target
 	
 	// find all of the targets
-	let targets = _.uniq(_.map(tests,"to")), targetIds = {}, netarg = nettype ? '--net='+nettype : '', allResults;
+	let targets = _.uniq(_.map(tests,"to")), targetIds = {}, allResults;
 	
 	// 1- create networks, if needed
 	// 2- start reflectors
@@ -282,18 +311,19 @@ runContainerTests = function (tests,nettype,callback) {
 	
 	async.waterfall([
 		function (cb) {
-			let portline = '-p '+NETSERVERPORT+':'+NETSERVERPORT+' -p '+NETSERVERDATAPORT+':'+NETSERVERDATAPORT+' -p '+NETSERVERDATAPORT+':'+NETSERVERDATAPORT+'/udp',
-			startCmd = 'docker run '+portline+' '+netarg+' -d --name=netserver netperf netserver -D -p '+NETSERVERPORT,
-			ipCmd = "docker inspect --format '{{ .NetworkSettings.IPAddress }}' netserver";
-			startReflectors(targets,startCmd,ipCmd,cb);
+			startReflectors(targets,test,cb);
 		},
 		function (res,cb) {
 			targetIds = res;
-			runTests(tests,targetIds,"container","docker run --rm "+netarg+" netperf ",cb);
+			getReflectorIp(targets,test,cb);
+		},
+		function (res,cb) {
+			targetIds = res;
+			runTests(tests,targetIds,"container",cb);
 		},
 		function (res,cb) {
 			allResults = res;
-			stopReflectors(targetIds,"docker stop netserver && docker rm netserver",cb);
+			stopReflectors(targetIds,test,cb);
 		}
 	],function (err) {
 		callback(err,allResults);
@@ -325,6 +355,7 @@ pair,
 keepItems = argv.keep || false,
 activeProtocols = _.uniq([].concat(argv.protocol || PROTOCOLS)),
 activeSizes = _.uniq([].concat(argv.size || SIZES)),
+// THIS MUST BE REPLACED BY VALIDATING AGAINST TESTS
 activeTests = _.uniq([].concat(argv.test || TESTS)),
 activeNetworks = _.uniq([].concat(argv.network || NETWORKS)),
 totalResults = []
@@ -676,15 +707,14 @@ async.waterfall([
 		// now run container tests - be sure to exclude metal
 		// THESE MUST BE SERIES, OR THEY WILL TROUNCE EACH OTHER!!
 		async.eachSeries(_.without(activeTests,'metal'),function (test,cb) {
-			// now run container with net=host tests
-			log("running net="+test+" tests");
+			log("running container:"+test+" tests");
 			// make the list of what we will test
 			let tests = genTestList({protocols:activeProtocols,sizes:activeSizes,networks:activeNetworks,devices:activeDevs, test:test, port:NETSERVERPORT, reps: REPETITIONS});
 			runContainerTests(tests,test,function (err,data) {
 				if(err) {
-					log("net="+test+" errors");
+					log("container:"+test+" errors");
 				} else {
-					log("net="+test+" complete");
+					log("container:"+test+" complete");
 					totalResults.push.apply(totalResults,data||[]);
 				}
 				cb(err);
