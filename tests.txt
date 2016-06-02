@@ -7,7 +7,7 @@ With each one, repeat for:
 
 Bare metal:
 	local: source process on target1 -> target process on target1
-	remote: source process on source1 -> target container on target1
+	remote: source process on source1 -> target process on target1
 
 Host networking:
 	local: source container on source1 -> target container on source1 
