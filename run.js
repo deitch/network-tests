@@ -147,40 +147,49 @@ getReflectorIp = function (targets,test,callback) {
 	let ips = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false;
-		var session = new ssh({
-			host: devices[target].ip_public.address,
-			user: "root",
-			key: pair.private
-		});
-		// get the reflector IP
+		let errCode = false, script = `tests/${test}/get-reflector-ip.sh`;
+		// maybe we do not even bother
+		if (fs.existsSync(`upload/${script}`)) {
+			log(`${target}: getting reflector IP`);
+			var session = new ssh({
+				host: devices[target].ip_public.address,
+				user: "root",
+				key: pair.private
+			});
+			// get the reflector IP
 
-		session.exec(`network-tests/tests/${test}/get-reflector-ip.sh`,{
-			exit: function (code,stdout) {
-				if (code !== 0) {
-					errCode = true;
-					session.end();
-					cb(target+": Failed to get netserver IP");
-				} else {
-					// if it has no IP, go for localhost
-					let ip = stdout.replace(/\n/,'').replace(/\s+/,'');
-					ips[target] = ip && ip !== "" ? ip : 'localhost';
+			session.exec(`network-tests/${script}`,{
+				exit: function (code,stdout) {
+					if (code !== 0) {
+						errCode = true;
+						session.end();
+						cb(target+": Failed to get netserver IP");
+					} else {
+						// if it has no IP, go for localhost
+						let ip = stdout.replace(/\n/,'').replace(/\s+/,'');
+						ips[target] = ip && ip !== "" ? ip : 'localhost';
+					}
 				}
-			}
-		});
-		session.on('error',function (err) {
-			log(target+": ssh error connecting to start netserver");
-			log(err);
-			session.end();
-			cb(target+": ssh connection failed");
-		});
-		session.on('close',function (hadError) {
-			if (!hadError && !errCode) {
-				log(target+": retrieved netserver IP "+ips[target]);
-				cb(null);
-			}
-		});
-		session.start();
+			});
+			session.on('error',function (err) {
+				log(target+": ssh error connecting to start netserver");
+				log(err);
+				session.end();
+				cb(target+": ssh connection failed");
+			});
+			session.on('close',function (hadError) {
+				if (!hadError && !errCode) {
+					log(target+": retrieved netserver IP "+ips[target]);
+					cb(null);
+				}
+			});
+			session.start();
+		} else {
+			let pip = devices[target].ip_private_mgmt;
+			log(`${target}: no get-reflector-ip.sh script, using private IP `+pip);
+			ips[target] = pip;
+			cb(null);
+		}
 	},function (err) {
 		if(err) {
 			callback(err);
@@ -268,33 +277,7 @@ stopReflectors = function (targets,test,callback) {
 	},callback);
 },
 
-
-runHostTests = function (tests,callback) {
-	// find all of the targets
-	let targets = _.uniq(_.map(tests,"to")), targetIds = {}, allResults;
-	
-	// three steps:
-	// 1- start reflectors
-	// 2- run tests
-	// 3- stop reflectors
-	async.waterfall([
-		function (cb) {
-			startReflectors(targets,'metal',cb);
-		},
-		function (res,cb) {
-			targetIds = res;
-			runTests(tests,targetIds,"benchmark",cb);
-		},
-		function (res,cb) {
-			allResults = res;
-			stopReflectors(targetIds,"metal",cb);
-		}
-	],function (err) {
-		callback(err,allResults);
-	});
-},
-
-runContainerTests = function (tests,test,callback) {
+runTestSuite = function (tests,test,callback) {
 	// need to start the reflector container on each target
 	
 	// find all of the targets
@@ -319,7 +302,7 @@ runContainerTests = function (tests,test,callback) {
 			_.forEach(res,function (value,key) {
 				targetIds[key].ip = value;
 			});
-			runTests(tests,targetIds,"container",cb);
+			runTests(tests,targetIds,test,cb);
 		},
 		function (res,cb) {
 			allResults = res;
@@ -702,7 +685,7 @@ async.waterfall([
 			log("running metal tests");
 			// make the list of what we will test
 			let tests = genTestList({protocols:activeProtocols,sizes:activeSizes,networks:activeNetworks,devices:activeDevs, test:"metal", port:NETSERVERPORT, reps: REPETITIONS});
-			runHostTests(tests,cb);
+			runTestSuite(tests,'metal',cb);
 		} else {
 			log("skipping metal tests");
 			cb(null,null);
@@ -721,7 +704,7 @@ async.waterfall([
 			log("running container:"+test+" tests");
 			// make the list of what we will test
 			let tests = genTestList({protocols:activeProtocols,sizes:activeSizes,networks:activeNetworks,devices:activeDevs, test:test, port:NETSERVERPORT, reps: REPETITIONS});
-			runContainerTests(tests,test,function (err,data) {
+			runTestSuite(tests,test,function (err,data) {
 				if(err) {
 					log("container:"+test+" errors");
 				} else {
