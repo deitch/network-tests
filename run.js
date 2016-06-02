@@ -49,9 +49,7 @@ PROJDATE = new Date().toISOString(),
 projName = "ULL-network-performance-test-"+PROJDATE,
 SIZES = [300,500,1024,2048],
 PROTOCOLS = ['TCP','UDP'],
-
-// THIS MUST BE REPLACED BY LISTING THE DIRECTORIES!
-TESTS = ["metal","bridge","host"],
+TESTS = fs.readdirSync('./upload/tests'),
 NETWORKS = ["local","remote"],
 CHECKDELAY = 30,
 NETSERVERPORT = 7002,
@@ -328,6 +326,27 @@ runContainerTests = function (tests,test,callback) {
 	],function (err) {
 		callback(err,allResults);
 	});
+},
+
+Usage = function () {
+	const msg = `
+
+Usage:
+${process.argv[1]} [OPTIONS]
+
+OPTIONS:
+	--help, -h: show this help
+	--type <type>: use only servers of type <type>, normally 1 or 3. May be invoked multiple times. Default is all types.
+	--protocol <protocol>: test only protocol <protocol>, normally UDP or TCP. May be invoked multiple times. Default is all of: ${PROTOCOLS.join(" ")}
+	--size <size>: test packets of size <size>, an integer. May be invoked multiple times. Default is all of: ${SIZES.join(" ")}
+	--test <test>: test to perform. May be invoked multiple times. Default is all of: ${TESTS.join(" ")}
+	--network <network>: network test to perform. May be invoked multiple times. Default is all of: ${NETWORKS.join(" ")}
+	--project <project>: use existing project ID <project> instead of creating new one
+	--keep: do not destroy servers or project at end of test run
+	`
+	;
+	console.log(msg);
+	process.exit(1);
 }
 
 ;
@@ -355,31 +374,21 @@ pair,
 keepItems = argv.keep || false,
 activeProtocols = _.uniq([].concat(argv.protocol || PROTOCOLS)),
 activeSizes = _.uniq([].concat(argv.size || SIZES)),
-// THIS MUST BE REPLACED BY VALIDATING AGAINST TESTS
-activeTests = _.uniq([].concat(argv.test || TESTS)),
+activeTests = argv.test ? _.uniq(_.reduce([].concat(argv.test),function (result,test) {
+	if (_.indexOf(TESTS,test) > -1) {
+		result.push(test);
+	} else {
+		console.log("Unknown test: "+test);
+		Usage();
+	}
+	return result;
+},[])) : TESTS,
 activeNetworks = _.uniq([].concat(argv.network || NETWORKS)),
 totalResults = []
 ;
 
 if (argv.help || argv.h) {
-	const msg = `
-
-Usage:
-${process.argv[1]} [OPTIONS]
-
-OPTIONS:
-	--help, -h: show this help
-	--type <type>: use only servers of type <type>, normally 1 or 3. May be invoked multiple times. Default is all types.
-	--protocol <protocol>: test only protocol <protocol>, normally UDP or TCP. May be invoked multiple times. Default is all of: ${PROTOCOLS.join(" ")}
-	--size <size>: test packets of size <size>, an integer. May be invoked multiple times. Default is all of: ${SIZES.join(" ")}
-	--test <test>: test to perform. May be invoked multiple times. Default is all of: ${TESTS.join(" ")}
-	--network <network>: network test to perform. May be invoked multiple times. Default is all of: ${NETWORKS.join(" ")}
-	--project <project>: use existing project ID <project> instead of creating new one
-	--keep: do not destroy servers or project at end of test run
-	`
-	;
-	console.log(msg);
-	process.exit(1);
+	Usage();
 }
 
 log(`using devices: ${_.keys(activeDevs).join(" ")}`);
