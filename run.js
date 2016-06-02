@@ -1,12 +1,49 @@
 /*jslint node:true, esversion:6 */
 
 var fs = require('fs'), Packet = require('packet-api'), async = require('async'), _ = require('lodash'), 
-scp = require('scp2'),
+scp = require('scp2'), CIDR = require('cidr-js'),
 ssh = require('simple-ssh'), keypair = require('keypair'), forge = require('node-forge'), jsonfile = require('jsonfile'),
 argv = require('minimist')(process.argv.slice(2));
 
 // import the token from the file token
 const TOKEN = fs.readFileSync('token').toString().replace(/\n/,''), pkt = new Packet(TOKEN),
+PacketAugmenters = (function(){
+	function getIpsUrl(projectId, id, action) {
+	    if (id) {
+	        return '/ips/' + (id + '/' || '') + (action || '');
+	    }
+	    if (projectId) {
+	        return '/projects/' + projectId + '/ips/';
+	    }
+	    return false;
+	}
+	function getDevicesIpsUrl(device) {
+      return '/devices/' + device + '/ips/';
+	}
+	
+	return {
+		getIps: function(projectId, id, parameters, callback) {
+		    var path = getIpsUrl(projectId, id);
+		    this._get(path, parameters, function(err, body) {
+		        callback(err, body);
+		    });
+		},
+		assignIp: function(device, ip, callback) {
+		    var path = getDevicesIpsUrl(device);
+		    this._post(path, ip, function(err, body) {
+		        callback(err, body);
+		    });
+		}
+	};
+}()),
+augmentPacket = function (proto,augmenters) {
+	_.each(augmenters,function (value,key) {
+		if (!proto[key]) {
+			proto[key] = value;
+		}
+	});
+	return proto;
+},
 SSHFILE = './keys',
 PROJDATE = new Date().toISOString(),
 projName = "ULL-network-performance-test-"+PROJDATE,
@@ -99,7 +136,7 @@ startReflectors = function (targets,startCmd,ipCmd,callback) {
 						}
 					});
 				} else {
-					targetIds[target].ip = devices[target].ip_private.address;
+					targetIds[target].ip = devices[target].ip_private_mgmt;
 				}
 			}
 		});
@@ -132,7 +169,7 @@ runTests = function (tests,targets,msgPrefix,cmdPrefix,callback) {
 	}
 	async.mapSeries(tests,function (t,cb) {
 		let msg = msgPrefix+" test: "+t.type+" "+t.protocol+" "+t.size, output,
-		target = t.type === "remote" ? devices[t.to].ip_private.address : targets[t.to].ip,
+		target = t.type === "remote" ? devices[t.to].ip_private_mgmt : targets[t.to].ip,
 		errCode = false;
 		log(t.from+": running "+msg);
 		// get the private IP for the device
@@ -237,10 +274,11 @@ runContainerTests = function (tests,nettype,callback) {
 	// find all of the targets
 	let targets = _.uniq(_.map(tests,"to")), targetIds = {}, netarg = nettype ? '--net='+nettype : '', allResults;
 	
-	// three steps:
-	// 1- start reflectors
-	// 2- run tests
-	// 3- stop reflectors
+	// 1- create networks, if needed
+	// 2- start reflectors
+	// 3- run tests
+	// 4- stop reflectors
+	// 5- remove networks
 	
 	async.waterfall([
 		function (cb) {
@@ -263,6 +301,10 @@ runContainerTests = function (tests,nettype,callback) {
 }
 
 ;
+
+
+// we need to augment the packet API
+
 
 // use command line args to determine
 // - if to install software
@@ -314,6 +356,9 @@ log(`using packet sizes: ${activeSizes.join(" ")}`);
 log(`using protocols: ${activeProtocols.join(" ")}`);
 log(`using tests: ${activeTests.join(" ")}`);
 log(`using network tests: ${activeNetworks.join(" ")}`);
+
+// augment packet
+augmentPacket(Packet.prototype,PacketAugmenters);
 
 
 
@@ -407,14 +452,13 @@ async.waterfall([
 							log(data);
 						} else {
 							log(item+": created");
-							devices[item].id = data.id;
 						}
 						callback(err);
 					});
 				})(item);
 			}
 		},cb);
-	},
+	},	
 	// wait for all servers to be ready
 	function (cb) {
 		log("all servers created");
@@ -439,9 +483,13 @@ async.waterfall([
 							let item = _.find(data.devices,{hostname:name});
 							if (item && item.state && item.state === "active" && name && !devices[name].ready) {
 								log(name+ " ready");
+								// save my ID
+								devices[name].id = item.id;
 								// save my private IP
-								devices[name].ip_public = _.find(item.ip_addresses, {public:true,address_family:4});
-								devices[name].ip_private = _.find(item.ip_addresses, {public:false,address_family:4});
+								devices[name].ip_public = _.find(item.ip_addresses, {public:true,address_family:4,management:true});
+								devices[name].ip_private_mgmt = _.find(item.ip_addresses, {public:false,address_family:4,management:true}).address;
+								devices[name].ip_private_net = _.map(_.filter(item.ip_addresses,{public:false,address_family:4,management:false}),"address");
+								// push those onto the private list
 								devices[name].ready = true;
 								waitingFor--;
 							}
@@ -466,6 +514,54 @@ async.waterfall([
 				cb(err);
 			}
 		);
+	},
+	// get all of our available IP ranges
+	function (cb) {
+		pkt.getIps(projId,false,{include:"assignments"},cb);
+	},
+	// ensure all IPs are assigned
+	function (res,cb) {
+		// find the available range 
+		// then figure out how many assignments we need, and how many we already have, to determine
+		// the total number required
+		let privateIpRange = _.find(res.ip_addresses,{address_family:4,public:false}),
+		cidr = new CIDR(), fullRange = cidr.list(privateIpRange.network+'/'+privateIpRange.cidr),
+		assigned = _.map(privateIpRange.assignments,"network"),
+		// we slice 10 because of a bug in how some of the addresses are assigned
+		usableIps = _.without.apply(_,[fullRange].concat(assigned)).slice(10),
+		// usableIps now contains a full list of usable IPs
+		
+		// next, we need to make a list of servers and assign IPs
+		toAssign = _.reduce(_.keys(activeDevs),function (result,item) {
+			// find out how many we need to assign
+			let missing = Math.max(2 - devices[item].ip_private_net.length,0);
+			for (let i=0; i<missing; i++) {
+				result.push({device:item,address:usableIps.shift()+'/32'});
+			}
+			return result;
+		},[]);
+
+		// we now have a list of servers and IPs to assign
+		
+		async.each(toAssign,function (entry,callback) {
+			log(entry.device+": assigning "+entry.address);
+			//closure to handle each correctly
+			(function(item,address) {
+				pkt.assignIp(devices[item].id,{address: address},function (err,data) {
+					if(err) {
+						log(item+": error assigning "+address);
+						log(err);
+						log(data);
+					} else {
+						log(item+": assigned "+address);
+						devices[item].ip_private_net.push(address);
+					}
+					callback(err);
+				});
+			})(entry.device,entry.address);
+		},function (err) {
+			cb(err);
+		});
 	},
 	// upload the scripts
 	function (cb) {
@@ -578,7 +674,8 @@ async.waterfall([
 
 
 		// now run container tests - be sure to exclude metal
-		async.each(_.without(activeTests,'metal'),function (test,cb) {
+		// THESE MUST BE SERIES, OR THEY WILL TROUNCE EACH OTHER!!
+		async.eachSeries(_.without(activeTests,'metal'),function (test,cb) {
 			// now run container with net=host tests
 			log("running net="+test+" tests");
 			// make the list of what we will test
@@ -592,14 +689,14 @@ async.waterfall([
 				}
 				cb(err);
 			});
-		},cb);
+		},function (err) {
+			log("container tests complete");
+			cb(err);
+		});
 	},
 
 	// destroy all hosts
 	function (cb) {
-		log("container tests complete");
-
-
 		if (keepItems) {
 			log("command-line flag not to destroy servers");
 			cb(null,false);
