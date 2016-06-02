@@ -214,7 +214,7 @@ runHostTests = function (tests,callback) {
 	// 1- start reflectors
 	// 2- run tests
 	// 3- stop reflectors
-	async.series([
+	async.waterfall([
 		function (cb) {
 			startReflectors(targets,'netserver -p '+NETSERVERPORT+' >/dev/null && pgrep netserver',cb);
 		},
@@ -577,36 +577,27 @@ async.waterfall([
 		totalResults.push.apply(totalResults,results||[]);
 
 
-		if (_.indexOf(activeTests,"bridge") > -1) {
+		// now run container tests - be sure to exclude metal
+		async.each(_.without(activeTests,'metal'),function (test,cb) {
 			// now run container with net=host tests
-			log("running net=bridge tests");
+			log("running net="+test+" tests");
 			// make the list of what we will test
-			let tests = genTestList({protocols:activeProtocols,sizes:activeSizes,networks:activeNetworks,devices:activeDevs, test:"bridge", port:NETSERVERPORT, reps: REPETITIONS});
-			runContainerTests(tests,'bridge',cb);
-		} else {
-			log("skipping net=bridge tests");
-			cb(null,null);
-		}
+			let tests = genTestList({protocols:activeProtocols,sizes:activeSizes,networks:activeNetworks,devices:activeDevs, test:test, port:NETSERVERPORT, reps: REPETITIONS});
+			runContainerTests(tests,test,function (err,data) {
+				if(err) {
+					log("net="+test+" errors");
+				} else {
+					log("net="+test+" complete");
+					totalResults.push.apply(totalResults,data||[]);
+				}
+				cb(err);
+			});
+		},cb);
 	},
-	function (results,cb) {
-		log("net=bridge tests complete");
-		totalResults.push.apply(totalResults,results||[]);
 
-		if (_.indexOf(activeTests,"host") > -1) {
-			// now run container with net=host tests
-			log("running net=host tests");
-			// make the list of what we will test
-			let tests = genTestList({protocols:activeProtocols,sizes:activeSizes,networks:activeNetworks,devices:activeDevs, test:"host", port:NETSERVERPORT, reps: REPETITIONS});
-			runContainerTests(tests,'host',cb);
-		} else {
-			log("skipping net=host tests");
-			cb(null,null);
-		}
-	},
 	// destroy all hosts
-	function (results,cb) {
-		log("net=host tests complete");
-		totalResults.push.apply(totalResults,results||[]);
+	function (cb) {
+		log("container tests complete");
 
 
 		if (keepItems) {
