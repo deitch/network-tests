@@ -17,6 +17,7 @@
     "node-forge": "^0.6.39",
     "packet-api": "packethost/packet-nodejs",
     "request": "^2.72.0",
+    "scp2": "^0.5.0",
     "simple-ssh": "^0.9.0"
   }
 }

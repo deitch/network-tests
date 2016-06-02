@@ -1,6 +1,7 @@
 /*jslint node:true, esversion:6 */
 
 var fs = require('fs'), Packet = require('packet-api'), async = require('async'), _ = require('lodash'), 
+scp = require('scp2'),
 ssh = require('simple-ssh'), keypair = require('keypair'), forge = require('node-forge'), jsonfile = require('jsonfile'),
 argv = require('minimist')(process.argv.slice(2));
 
@@ -12,6 +13,7 @@ projName = "ULL-network-performance-test-"+PROJDATE,
 SIZES = [300,500,1024,2048],
 PROTOCOLS = ['TCP','UDP'],
 TESTS = ["metal","bridge","host"],
+NETWORKS = ["local","remote"],
 CHECKDELAY = 30,
 NETSERVERPORT = 7002,
 NETSERVERDATAPORT = 7003,
@@ -41,8 +43,170 @@ devices = {
 	}
 };
 
-const runHostTests = function (tests,callback) {
-	// need to start the reflector container on each target
+const genTestList = function (params) {
+	let tests = [];
+	_.each(params.protocols,function (proto) {
+		_.each(params.sizes, function (size) {
+			_.each(params.networks, function (nettest) {
+				_.each(_.keys(_.pickBy(params.devices,{purpose:"target"})),function (dev) {
+					let from = nettest === "local" ? dev : dev.replace('target','source');
+					tests.push({test: params.test, type: nettest, from:from, to:dev, port:params.port, reps: params.reps, size: size, protocol: proto});
+				});
+			});
+		});
+	});
+	return tests;
+},
+
+startReflectors = function (targets,startCmd,ipCmd,callback) {
+	if (callback === undefined && typeof(ipCmd) === "function") {
+		callback = ipCmd;
+		ipCmd = null;
+	}
+	let targetIds = {};
+	// now start the reflector on each
+	async.each(targets,function (target,cb) {
+		let errCode = false;
+		targetIds[target] = {};
+		var session = new ssh({
+			host: devices[target].ip_public.address,
+			user: "root",
+			key: pair.private
+		});
+		// start the netserver container
+		session.exec(startCmd,{
+			exit: function (code,stdout) {
+				if (code !== 0) {
+					errCode = true;
+					session.end();
+					cb(target+": Failed to start netserver");
+				} else {
+					targetIds[target].id = stdout.replace(/\n/,'').replace(/\s+/,'');
+				}
+				// do we have an IP command?
+				if (ipCmd) {
+					session.exec(ipCmd,{
+						exit: function (code,stdout) {
+							if (code !== 0) {
+								errCode = true;
+								session.end();
+								cb(target+": Failed to get netserver IP");
+							} else {
+								// if it has no IP, go for localhost
+								let ip = stdout.replace(/\n/,'').replace(/\s+/,'');
+								targetIds[target].ip = ip && ip !== "" ? ip : 'localhost';
+							}
+						}
+					});
+				} else {
+					targetIds[target].ip = devices[target].ip_private.address;
+				}
+			}
+		});
+		session.on('error',function (err) {
+			log(target+": ssh error connecting to start netserver");
+			log(err);
+			session.end();
+			cb(target+": ssh connection failed");
+		});
+		session.on('close',function (hadError) {
+			if (!hadError && !errCode) {
+				log(target+": netserver started "+targetIds[target].id);
+				cb(null);
+			}
+		});
+		session.start();
+	},function (err) {
+		if(err) {
+			callback(err);
+		} else {
+			callback(null,targetIds);
+		}
+	});
+},
+runTests = function (tests,targets,msgPrefix,cmdPrefix,callback) {
+	// this must be run in series so they don't impact each other
+	if (callback === undefined && typeof(cmdPrefix) === "function") {
+		callback = cmdPrefix;
+		cmdPrefix = "";
+	}
+	async.mapSeries(tests,function (t,cb) {
+		let msg = msgPrefix+" test: "+t.type+" "+t.protocol+" "+t.size, output,
+		target = t.type === "remote" ? devices[t.to].ip_private.address : targets[t.to].ip,
+		errCode = false;
+		log(t.from+": running "+msg);
+		// get the private IP for the device
+		let session = new ssh({
+			host: devices[t.from].ip_public.address,
+			user: "root",
+			key: pair.private
+		}), cmd = cmdPrefix+'netperf  -P 0 -H '+target+' -c -t '+t.protocol+'_RR -l -'+t.reps+' -v 2 -p '+t.port+' -- -k -r '+t.size+','+t.size+' -P '+NETSERVERLOCALPORT+','+NETSERVERDATAPORT;
+		//log(dockerCmd);
+		session.exec(cmd, {
+			exit: function (code,stdout) {
+				if (code !== 0) {
+					errCode = true;
+					session.end();
+					cb(t.from+": Failed to start netperf");
+				} else {
+					output = stdout;
+				}
+			}
+		})
+		;
+		session.on('error',function (err) {
+			log(t.from+": ssh error connecting for "+msg);
+			log(err);
+			session.end();
+			cb(t.from+": ssh connection failed");
+		});
+		session.on('close',function (hadError) {
+			if (!hadError && !errCode) {
+				log(t.from+": test complete: "+msg);
+				// save the results from this test
+				cb(null,_.extend({},t,{results:output}));
+			}
+		});
+		session.start();
+	},callback);
+},
+
+stopReflectors = function (targets,cmd,callback) {
+	// stop the netserver reflectors
+	async.each(_.keys(targets),function (target,cb) {
+		let errCode = false;
+		var session = new ssh({
+			host: devices[target].ip_public.address,
+			user: "root",
+			key: pair.private
+		});
+		// stop the netserver container
+		session.exec(cmd,{
+			exit: function (code) {
+				if (code !== 0) {
+					errCode = true;
+					session.end();
+					cb(target+": Failed to stop netserver "+targets[target].id);
+				}
+			}
+		});
+		session.on('error',function (err) {
+			log(target+": ssh error connecting to stop netserver");
+			log(err);
+			session.end();
+			cb(target+": ssh connection failed");
+		});
+		session.on('close',function (hadError) {
+			if (!hadError && !errCode) {
+				log(target+": netserver stopped "+targets[target].id);
+				cb(null);
+			}
+		});
+		session.start();
+	},callback);
+},
+
+runHostTests = function (tests,callback) {
 	// find all of the targets
 	let targets = _.uniq(_.map(tests,"to")), targetIds = {}, allResults;
 	
@@ -52,124 +216,15 @@ const runHostTests = function (tests,callback) {
 	// 3- stop reflectors
 	async.series([
 		function (cb) {
-			// now start the reflector on each
-			let errCode = false;
-			async.each(targets,function (target,cb) {
-				targetIds[target] = {};
-				var session = new ssh({
-					host: devices[target].ip_public.address,
-					user: "root",
-					key: pair.private
-				});
-				// start the netserver container
-				session.exec('netserver -p '+NETSERVERPORT+' && pgrep netserver',{
-					exit: function (code) {
-						if (code !== 0) {
-							errCode = true;
-							session.end();
-							cb(target+": Failed to start netserver");
-						}
-					},
-					out: function (stdout) {
-						targetIds[target].id = stdout.replace(/\n/,'').replace(/\s+/,'');
-						targetIds[target].ip = devices[target].ip_private.address;
-					}
-				});
-				session.on('error',function (err) {
-					log(target+": ssh error connecting to start netserver");
-					log(err);
-					session.end();
-					cb(target+": ssh connection failed");
-				});
-				session.on('close',function (hadError) {
-					if (!hadError && !errCode) {
-						log(target+": netserver started "+targetIds[target].id);
-						cb(null);
-					}
-				});
-				session.start();
-			},function (err) {
-				cb(err);
-			});
+			startReflectors(targets,'netserver -p '+NETSERVERPORT+' >/dev/null && pgrep netserver',cb);
 		},
-		function (cb) {
-			// this must be run in series so they don't impact each other
-			async.mapSeries(tests,function (t,cb) {
-				let msg = "benchmark test: "+t.type+" "+t.protocol+" "+t.size, target = targetIds[t.to].ip, output,
-				errCode = false;
-				log(t.from+": running "+msg);
-				// get the private IP for the device
-				var session = new ssh({
-					host: devices[t.from].ip_public.address,
-					user: "root",
-					key: pair.private
-				});
-				session.exec('netperf  -P 0 -H '+target+' -c -t '+t.protocol+'_RR -l -'+t.reps+' -v 2 -p '+t.port+' -- -k -r '+t.size+','+t.size+' -P '+NETSERVERLOCALPORT+','+NETSERVERDATAPORT, {
-					exit: function (code) {
-						if (code !== 0) {
-							log(t.from+": Failed to start run netperf");
-							errCode = true;
-							session.end();
-						}
-					},
-					out: function (stdout) {
-						output = stdout;
-					}
-				})
-				;
-				session.on('error',function (err) {
-					log(t.from+": ssh error connecting for "+msg);
-					log(err);
-					session.end();
-					cb(t.from+": ssh connection failed");
-				});
-				session.on('close',function (hadError) {
-					if (!hadError && !errCode) {
-						log(t.from+": test complete: "+msg);
-						cb(null,_.extend({},t,{results:output}));
-					}
-				});
-				session.start();
-			},function (err,data) {
-				allResults = data;
-				cb(err);
-			});
+		function (res,cb) {
+			targetIds = res;
+			runTests(tests,targetIds,"benchmark",cb);
 		},
-		function (cb) {
-			// stop the netserver reflectors
-			async.each(targets,function (target,cb) {
-				let errCode = false;
-				var session = new ssh({
-					host: devices[target].ip_public.address,
-					user: "root",
-					key: pair.private
-				});
-				// stop the netserver container
-				session.exec('kill '+targetIds[target].id,{
-					exit: function (code) {
-						if (code !== 0) {
-							errCode = true;
-							session.end();
-							cb(target+": Failed to stop netserver "+targetIds[target].id);
-						}
-					}
-				});
-				session.on('error',function (err) {
-					log(target+": ssh error connecting to stop netserver");
-					log(err);
-					session.end();
-					cb(target+": ssh connection failed");
-				});
-				session.on('close',function (hadError) {
-					if (!hadError && !errCode) {
-						log(target+": netserver stopped "+targetIds[target].id);
-						cb(null);
-					}
-				});
-				session.start();
-			},function (err) {
-				cb(err);
-			});
+		function (res,cb) {
+			allResults = res;
+			stopReflectors(targetIds,"pkill netserver",cb);
 		}
 	],function (err) {
 		callback(err,allResults);
@@ -187,142 +242,20 @@ runContainerTests = function (tests,nettype,callback) {
 	// 2- run tests
 	// 3- stop reflectors
 	
-	async.series([
+	async.waterfall([
 		function (cb) {
-			// now start the reflector on each
-			async.each(targets,function (target,cb) {
-				targetIds[target] = {};
-				let errCode = false;
-				var session = new ssh({
-					host: devices[target].ip_public.address,
-					user: "root",
-					key: pair.private
-				});
-				// start the netserver container
-				let portline = '-p '+NETSERVERPORT+':'+NETSERVERPORT+' -p '+NETSERVERDATAPORT+':'+NETSERVERDATAPORT+' -p '+NETSERVERDATAPORT+':'+NETSERVERDATAPORT+'/udp';
-				session.exec('docker run '+portline+' '+netarg+' -d --name=netserver netperf netserver -D -p '+NETSERVERPORT,{
-					exit: function (code,stdout) {
-						if (code !== 0) {
-							errCode = true;
-							session.end();
-							cb(target+": container netserver");
-						} else {
-							targetIds[target].id = stdout.replace(/\n/,'').replace(/\s+/,'');
-						}
-					}
-				})
-				.exec("docker inspect --format '{{ .NetworkSettings.IPAddress }}' netserver",{
-					exit: function (code,stdout) {
-						if (code !== 0) {
-							errCode = true;
-							session.end();
-							cb(target+": Failed to get container netserver IP");
-						} else {
-							// if it has no IP, go for localhost
-							let ip = stdout.replace(/\n/,'').replace(/\s+/,'');
-							targetIds[target].ip = ip && ip !== "" ? ip : 'localhost';
-						}
-					}
-				})
-				;
-				session.on('error',function (err) {
-					log(target+": ssh error connecting to start netserver container");
-					log(err);
-					session.end();
-					cb(target+": ssh connection failed");
-				});
-				session.on('close',function (hadError) {
-					if (!hadError && !errCode) {
-						log(target+": netserver container started "+targetIds[target].id);
-						cb(null);
-					}
-				});
-				session.start();
-			},function (err) {
-				cb(err);
-			});
+			let portline = '-p '+NETSERVERPORT+':'+NETSERVERPORT+' -p '+NETSERVERDATAPORT+':'+NETSERVERDATAPORT+' -p '+NETSERVERDATAPORT+':'+NETSERVERDATAPORT+'/udp',
+			startCmd = 'docker run '+portline+' '+netarg+' -d --name=netserver netperf netserver -D -p '+NETSERVERPORT,
+			ipCmd = "docker inspect --format '{{ .NetworkSettings.IPAddress }}' netserver";
+			startReflectors(targets,startCmd,ipCmd,cb);
 		},
-		function (cb) {
-			// this must be run in series so they don't impact each other
-			async.mapSeries(tests,function (t,cb) {
-				let msg = "container test: "+t.type+" "+t.protocol+" "+t.size, output,
-				target = t.type === "remote" ? devices[t.to].ip_private.address : targetIds[t.to].ip,
-				errCode = false;
-				log(t.from+": running "+msg);
-				// get the private IP for the device
-				let session = new ssh({
-					host: devices[t.from].ip_public.address,
-					user: "root",
-					key: pair.private
-				}), dockerCmd = 'docker run --rm '+netarg+' netperf netperf -P 0 -H '+target+' -c -t '+t.protocol+'_RR -l -'+t.reps+' -v 2 -p '+t.port+' -- -k -r '+t.size+','+t.size+' -P '+NETSERVERLOCALPORT+','+NETSERVERDATAPORT;
-				//log(dockerCmd);
-				session.exec(dockerCmd, {
-					exit: function (code) {
-						if (code !== 0) {
-							errCode = true;
-							session.end();
-							cb(t.from+": Failed to start host netperf");
-						}
-					},
-					out: function (stdout) {
-						output = stdout;
-					}
-				})
-				;
-				session.on('error',function (err) {
-					log(t.from+": ssh error connecting for "+msg);
-					log(err);
-					session.end();
-					cb(t.from+": ssh connection failed");
-				});
-				session.on('close',function (hadError) {
-					if (!hadError && !errCode) {
-						log(t.from+": test complete: "+msg);
-						// save the results from this test
-						cb(null,_.extend({},t,{results:output}));
-					}
-				});
-				session.start();
-			},function (err,data) {
-				allResults = data;
-				cb(err);
-			});
+		function (res,cb) {
+			targetIds = res;
+			runTests(tests,targetIds,"container","docker run --rm "+netarg+" netperf ",cb);
 		},
-		function (cb) {
-			// stop the netserver reflectors
-			async.each(targets,function (target,cb) {
-				let errCode = false;
-				var session = new ssh({
-					host: devices[target].ip_public.address,
-					user: "root",
-					key: pair.private
-				});
-				// stop the netserver container
-				session.exec('docker stop netserver && docker rm netserver',{
-					exit: function (code) {
-						if (code !== 0) {
-							errCode = true;
-							session.end();
-							cb(target+": Failed to stop and rm container netserver");
-						}
-					}
-				});
-				session.on('error',function (err) {
-					log(target+": ssh error connecting to stop netserver container");
-					log(err);
-					session.end();
-					cb(target+": ssh connection failed");
-				});
-				session.on('close',function (hadError) {
-					if (!hadError && !errCode) {
-						log(target+": netserver container stopped");
-						cb(null);
-					}
-				});
-				session.start();
-			},function (err) {
-				cb(err);
-			});
+		function (res,cb) {
+			allResults = res;
+			stopReflectors(targetIds,"docker stop netserver && docker rm netserver",cb);
 		}
 	],function (err) {
 		callback(err,allResults);
@@ -351,6 +284,7 @@ keepItems = argv.keep || false,
 activeProtocols = _.uniq([].concat(argv.protocol || PROTOCOLS)),
 activeSizes = _.uniq([].concat(argv.size || SIZES)),
 activeTests = _.uniq([].concat(argv.test || TESTS)),
+activeNetworks = _.uniq([].concat(argv.network || NETWORKS)),
 totalResults = []
 ;
 
@@ -366,6 +300,7 @@ OPTIONS:
 	--protocol <protocol>: test only protocol <protocol>, normally UDP or TCP. May be invoked multiple times. Default is all of: ${PROTOCOLS.join(" ")}
 	--size <size>: test packets of size <size>, an integer. May be invoked multiple times. Default is all of: ${SIZES.join(" ")}
 	--test <test>: test to perform. May be invoked multiple times. Default is all of: ${TESTS.join(" ")}
+	--network <network>: network test to perform. May be invoked multiple times. Default is all of: ${NETWORKS.join(" ")}
 	--project <project>: use existing project ID <project> instead of creating new one
 	--keep: do not destroy servers or project at end of test run
 	`
@@ -378,6 +313,7 @@ log(`using devices: ${_.keys(activeDevs).join(" ")}`);
 log(`using packet sizes: ${activeSizes.join(" ")}`);
 log(`using protocols: ${activeProtocols.join(" ")}`);
 log(`using tests: ${activeTests.join(" ")}`);
+log(`using network tests: ${activeNetworks.join(" ")}`);
 
 
 
@@ -481,7 +417,7 @@ async.waterfall([
 	},
 	// wait for all servers to be ready
 	function (cb) {
-		log("all servers ready");
+		log("all servers created");
 		// how do we wait for all the devices to be ready?
 		// we check the state of each one until it is ready
 		log("waiting for all devices to be ready");
@@ -531,7 +467,36 @@ async.waterfall([
 			}
 		);
 	},
-	// install necessary software
+	// upload the scripts
+	function (cb) {
+		log("uploading scripts");
+		async.each(_.keys(activeDevs), function (item,cb) {
+			// get the IP for the device
+			let ipaddr = devices[item].ip_public.address;
+			log(item+": uploading scripts to "+ipaddr);
+			scp.scp('upload',{
+				host: ipaddr,
+				username: 'root',
+				privateKey: pair.private,
+				path: '/root/network-tests/'
+			},function (err) {
+				if (err) {
+					log(item+": failed to upload scripts to "+ipaddr);
+				} else {
+					log(item+": successfully uploaded scripts to "+ipaddr);
+				}
+				cb(err);
+			});
+		}, function (err) {
+			if (err) {
+				log("failed to upload scripts");
+			} else {
+				log("scripts uploaded to all servers");
+			}
+			cb(err);
+		});		
+	},
+	// run installs
 	function (cb) {
 		log("installing software");
 		async.each(_.keys(activeDevs), function (item,cb) {
@@ -544,22 +509,6 @@ async.waterfall([
 				key: pair.private
 			});
 			session
-				.exec('yum install -y git',{
-					exit: function (code) {
-						if (code !== 0) {
-							session.end();
-							cb(item+": Failed to install git");
-						}
-					}
-				})
-				.exec('if [[ -d network-tests/.git ]]; then cd network-tests && git pull origin master; else git clone git://github.com/deitch/network-tests; fi',{
-					exit: function (code) {
-						if (code !== 0) {
-							log(item+": Failed to clone deitch/network-tests");
-							session.end();
-						}
-					}
-				})
 				.exec('network-tests/scripts/installnetperf.sh',{
 					exit: function (code) {
 						if (code !== 0) {
@@ -614,17 +563,7 @@ async.waterfall([
 		if (_.indexOf(activeTests,"metal") > -1) {
 			log("running metal tests");
 			// make the list of what we will test
-			let tests = [];
-			_.each(activeProtocols,function (proto) {
-				_.each(activeSizes, function (size) {
-					_.each(_.keys(_.pickBy(activeDevs,{purpose:"target"})),function (dev) {
-						// local tests
-						tests.push({test: "metal", type: "local", from:dev, to:dev, port:NETSERVERPORT, reps: REPETITIONS, size: size, protocol: proto});
-						// remote tests
-						tests.push({test: "metal", type: "remote", from:dev.replace('target','source'), to:dev, port:NETSERVERPORT, reps: REPETITIONS, size: size, protocol: proto});
-					});
-				});
-			});
+			let tests = genTestList({protocols:activeProtocols,sizes:activeSizes,networks:activeNetworks,devices:activeDevs, test:"metal", port:NETSERVERPORT, reps: REPETITIONS});
 			runHostTests(tests,cb);
 		} else {
 			log("skipping metal tests");
@@ -642,17 +581,7 @@ async.waterfall([
 			// now run container with net=host tests
 			log("running net=bridge tests");
 			// make the list of what we will test
-			let tests = [];
-			_.each(activeProtocols,function (proto) {
-				_.each(activeSizes, function (size) {
-					_.each(_.keys(_.pickBy(activeDevs,{purpose:"target"})),function (dev) {
-						// local tests
-						tests.push({test: "bridge", type: "local", from:dev, to:dev, port:NETSERVERPORT, reps: REPETITIONS, size: size, protocol: proto});
-						// remote tests
-						tests.push({test: "bridge", type: "remote", from:dev.replace('target','source'), to:dev, port:NETSERVERPORT, reps: REPETITIONS, size: size, protocol: proto});
-					});
-				});
-			});
+			let tests = genTestList({protocols:activeProtocols,sizes:activeSizes,networks:activeNetworks,devices:activeDevs, test:"bridge", port:NETSERVERPORT, reps: REPETITIONS});
 			runContainerTests(tests,'bridge',cb);
 		} else {
 			log("skipping net=bridge tests");
@@ -667,17 +596,7 @@ async.waterfall([
 			// now run container with net=host tests
 			log("running net=host tests");
 			// make the list of what we will test
-			let tests = [];
-			_.each(activeProtocols,function (proto) {
-				_.each(activeSizes, function (size) {
-					_.each(_.keys(_.pickBy(activeDevs,{purpose:"target"})),function (dev) {
-						// local tests
-						tests.push({test: "host", type: "local", from:dev, to:dev, port:NETSERVERPORT, reps: REPETITIONS, size: size, protocol: proto});
-						// remote tests
-						tests.push({test: "host", type: "remote", from:dev.replace('target','source'), to:dev, port:NETSERVERPORT, reps: REPETITIONS, size: size, protocol: proto});
-					});
-				});
-			});
+			let tests = genTestList({protocols:activeProtocols,sizes:activeSizes,networks:activeNetworks,devices:activeDevs, test:"host", port:NETSERVERPORT, reps: REPETITIONS});
 			runContainerTests(tests,'host',cb);
 		} else {
 			log("skipping net=host tests");
@@ -757,7 +676,7 @@ async.waterfall([
 	if (err) {
 		log(err);
 	} else {
-		//console.log(totalResults);
+		console.log(totalResults);
 	}
 });
 
