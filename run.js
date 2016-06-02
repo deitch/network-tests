@@ -144,11 +144,10 @@ startReflectors = function (targets,test,callback) {
 },
 
 getReflectorIp = function (targets,test,callback) {
-	let targetIds = {};
+	let ips = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
 		let errCode = false;
-		targetIds[target] = {};
 		var session = new ssh({
 			host: devices[target].ip_public.address,
 			user: "root",
@@ -165,7 +164,7 @@ getReflectorIp = function (targets,test,callback) {
 				} else {
 					// if it has no IP, go for localhost
 					let ip = stdout.replace(/\n/,'').replace(/\s+/,'');
-					targetIds[target].ip = ip && ip !== "" ? ip : 'localhost';
+					ips[target] = ip && ip !== "" ? ip : 'localhost';
 				}
 			}
 		});
@@ -177,7 +176,7 @@ getReflectorIp = function (targets,test,callback) {
 		});
 		session.on('close',function (hadError) {
 			if (!hadError && !errCode) {
-				log(target+": retrieved netserver IP "+targetIds[target].ip);
+				log(target+": retrieved netserver IP "+ips[target]);
 				cb(null);
 			}
 		});
@@ -186,7 +185,7 @@ getReflectorIp = function (targets,test,callback) {
 		if(err) {
 			callback(err);
 		} else {
-			callback(null,targetIds);
+			callback(null,ips);
 		}
 	});
 },
@@ -316,7 +315,10 @@ runContainerTests = function (tests,test,callback) {
 			getReflectorIp(targets,test,cb);
 		},
 		function (res,cb) {
-			targetIds = res;
+			// add the IP for each one
+			_.forEach(res,function (value,key) {
+				targetIds[key].ip = value;
+			});
 			runTests(tests,targetIds,"container",cb);
 		},
 		function (res,cb) {
