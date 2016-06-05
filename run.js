@@ -164,10 +164,7 @@ getReflectorIp = function (targets,test,callback) {
 		// get the reflector IP
 
 		session.exec(cmd,{
-			exit: function (code,stdout,stderr) {
-				console.log(code);
-				console.log(stdout);
-				console.log(stderr);
+			exit: function (code,stdout) {
 				if (code !== 0) {
 					errCode = true;
 					session.end();
