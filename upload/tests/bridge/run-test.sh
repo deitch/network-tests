@@ -2,5 +2,5 @@
 
 set -e
 
-docker run --rm --net=bridge netperf netperf  -P 0 -H $1 -c -t $2_RR -l -$3 -v 2 -p $4 -- -k -r $5,$5 -P $6,$7
+docker run --rm --net=bridge -p $6:$6 -p $6:$6/udp netperf netperf  -P 0 -H $1 -c -t $2_RR -l -$3 -v 2 -p $4 -- -k -r $5,$5 -P $6,$7
 
