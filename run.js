@@ -1,49 +1,12 @@
 /*jslint node:true, esversion:6 */
 
-var fs = require('fs'), Packet = require('packet-api'), async = require('async'), _ = require('lodash'), 
+var fs = require('fs'), Packet = require('packet-nodejs'), async = require('async'), _ = require('lodash'), 
 scp = require('scp2'), CIDR = require('cidr-js'),
 ssh = require('simple-ssh'), keypair = require('keypair'), forge = require('node-forge'), jsonfile = require('jsonfile'),
 argv = require('minimist')(process.argv.slice(2));
 
 // import the token from the file token
 const TOKEN = fs.readFileSync('token').toString().replace(/\n/,''), pkt = new Packet(TOKEN),
-PacketAugmenters = (function(){
-	function getIpsUrl(projectId, id, action) {
-	    if (id) {
-	        return '/ips/' + (id + '/' || '') + (action || '');
-	    }
-	    if (projectId) {
-	        return '/projects/' + projectId + '/ips/';
-	    }
-	    return false;
-	}
-	function getDevicesIpsUrl(device) {
-      return '/devices/' + device + '/ips/';
-	}
-	
-	return {
-		getIps: function(projectId, id, parameters, callback) {
-		    var path = getIpsUrl(projectId, id);
-		    this._get(path, parameters, function(err, body) {
-		        callback(err, body);
-		    });
-		},
-		assignIp: function(device, ip, callback) {
-		    var path = getDevicesIpsUrl(device);
-		    this._post(path, ip, function(err, body) {
-		        callback(err, body);
-		    });
-		}
-	};
-}()),
-augmentPacket = function (proto,augmenters) {
-	_.each(augmenters,function (value,key) {
-		if (!proto[key]) {
-			proto[key] = value;
-		}
-	});
-	return proto;
-},
 SSHFILE = './keys',
 PROJDATE = new Date().toISOString(),
 projName = "ULL-network-performance-test-"+PROJDATE,
@@ -337,8 +300,6 @@ OPTIONS:
 ;
 
 
-// we need to augment the packet API
-
 
 // use command line args to determine
 // - if to install software
@@ -381,10 +342,6 @@ log(`using packet sizes: ${activeSizes.join(" ")}`);
 log(`using protocols: ${activeProtocols.join(" ")}`);
 log(`using tests: ${activeTests.join(" ")}`);
 log(`using network tests: ${activeNetworks.join(" ")}`);
-
-// augment packet
-augmentPacket(Packet.prototype,PacketAugmenters);
-
 
 
 // get the public key in the right format
@@ -542,7 +499,8 @@ async.waterfall([
 	},
 	// get all of our available IP ranges
 	function (cb) {
-		pkt.getIps(projId,false,{include:"assignments"},cb);
+		log("getting IP ranges");
+		pkt.getProjectIpReservations(projId,{include:"assignments"},cb);
 	},
 	// ensure all IPs are assigned
 	function (res,cb) {
