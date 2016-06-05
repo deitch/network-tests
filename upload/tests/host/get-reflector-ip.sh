@@ -5,7 +5,7 @@ set -e
 IP1=$1
 IP2=$2
 
-localIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' netserver)
+localIP=$IP2
 remoteIP=$IP2
 
 echo $localIP $remoteIP
