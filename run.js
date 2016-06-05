@@ -59,6 +59,49 @@ const genTestList = function (params) {
 },
 
 
+setupNetwork = function (targets,test,callback) {
+	// now start the reflector on each
+	async.each(targets,function (target,cb) {
+		let errCode = false, privateIps = devices[target].ip_private_net,
+		cmd = `network-tests/tests/${test}/setup-network.sh ${privateIps[0]} ${privateIps[1]}`;
+		var session = new ssh({
+			host: devices[target].ip_public.address,
+			user: "root",
+			key: pair.private
+		});
+		// start the netserver container
+		log(cmd);
+		session.exec(cmd,{
+			exit: function (code) {
+				if (code !== 0) {
+					errCode = true;
+					session.end();
+					cb(target+": Failed to setup network");
+				}
+			}
+		});
+		session.on('error',function (err) {
+			log(target+": ssh error connecting to start netserver");
+			log(err);
+			session.end();
+			cb(target+": ssh connection failed");
+		});
+		session.on('close',function (hadError) {
+			if (!hadError && !errCode) {
+				log(`${target}: network set up successfully`);
+				cb(null);
+			}
+		});
+		session.start();
+	},function (err) {
+		if(err) {
+			callback(err);
+		} else {
+			callback(null);
+		}
+	});
+},
+
 startReflectors = function (targets,test,callback) {
 	let targetIds = {};
 	// now start the reflector on each
@@ -81,7 +124,6 @@ startReflectors = function (targets,test,callback) {
 				} else {
 					targetIds[target].id = stdout.replace(/\n/,'').replace(/\s+/,'');
 				}
-				targetIds[target].ip = devices[target].ip_private_mgmt;
 			}
 		});
 		session.on('error',function (err) {
@@ -110,49 +152,47 @@ getReflectorIp = function (targets,test,callback) {
 	let ips = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, script = `tests/${test}/get-reflector-ip.sh`;
-		// maybe we do not even bother
-		if (fs.existsSync(`upload/${script}`)) {
-			log(`${target}: getting reflector IP`);
-			var session = new ssh({
-				host: devices[target].ip_public.address,
-				user: "root",
-				key: pair.private
-			});
-			// get the reflector IP
+		let errCode = false, privateIps = devices[target].ip_private_net,
+		cmd = `network-tests/tests/${test}/get-reflector-ip.sh ${privateIps[0]} ${privateIps[1]}`;
+		log(`${target}: getting reflector IP`);
+		log(cmd);
+		var session = new ssh({
+			host: devices[target].ip_public.address,
+			user: "root",
+			key: pair.private
+		});
+		// get the reflector IP
 
-			session.exec(`network-tests/${script}`,{
-				exit: function (code,stdout) {
-					if (code !== 0) {
-						errCode = true;
-						session.end();
-						cb(target+": Failed to get netserver IP");
-					} else {
-						// if it has no IP, go for localhost
-						let ip = stdout.replace(/\n/,'').replace(/\s+/,'');
-						ips[target] = ip && ip !== "" ? ip : 'localhost';
-					}
+		session.exec(cmd,{
+			exit: function (code,stdout,stderr) {
+				console.log(code);
+				console.log(stdout);
+				console.log(stderr);
+				if (code !== 0) {
+					errCode = true;
+					session.end();
+					cb(target+": Failed to get netserver IP");
+				} else {
+					// the stdout response should be a space separated list of IPs. The first is for local, the second is for remote
+					let ip = stdout.replace(/\s+/g," ").replace(/(^\s+|\s+$)/,'').split(/\s/);
+					ips[target] = {local:ip[0],remote:ip[1]};
 				}
-			});
-			session.on('error',function (err) {
-				log(target+": ssh error connecting to start netserver");
-				log(err);
-				session.end();
-				cb(target+": ssh connection failed");
-			});
-			session.on('close',function (hadError) {
-				if (!hadError && !errCode) {
-					log(target+": retrieved netserver IP "+ips[target]);
-					cb(null);
-				}
-			});
-			session.start();
-		} else {
-			let pip = devices[target].ip_private_mgmt;
-			log(`${target}: no get-reflector-ip.sh script, using private IP `+pip);
-			ips[target] = pip;
-			cb(null);
-		}
+			}
+		});
+		session.on('error',function (err) {
+			log(target+": ssh error connecting to start netserver");
+			log(err);
+			session.end();
+			cb(target+": ssh connection failed");
+		});
+		session.on('close',function (hadError) {
+			if (!hadError && !errCode) {
+				log(target+": retrieved netserver IP "+ips[target]);
+				cb(null);
+			}
+		});
+		session.start();
+
 	},function (err) {
 		if(err) {
 			callback(err);
@@ -166,7 +206,7 @@ runTests = function (tests,targets,msgPrefix,callback) {
 	// this must be run in series so they don't impact each other
 	async.mapSeries(tests,function (t,cb) {
 		let msg = msgPrefix+" test: "+t.type+" "+t.protocol+" "+t.size, output,
-		target = t.type === "remote" ? devices[t.to].ip_private_mgmt : targets[t.to].ip,
+		target = targets[t.to].ip[t.type],
 		errCode = false;
 		log(t.from+": running "+msg);
 		// get the private IP for the device
@@ -174,8 +214,9 @@ runTests = function (tests,targets,msgPrefix,callback) {
 			host: devices[t.from].ip_public.address,
 			user: "root",
 			key: pair.private
-		}), 
+		}),
 		cmd = `network-tests/tests/${t.test}/run-test.sh  ${target} ${t.protocol} ${t.reps} ${t.port} ${t.size} ${NETSERVERLOCALPORT} ${NETSERVERDATAPORT}`;
+		log(cmd);
 		session.exec(cmd, {
 			exit: function (code,stdout) {
 				if (code !== 0) {
@@ -253,6 +294,9 @@ runTestSuite = function (tests,test,callback) {
 	// 5- remove networks
 	
 	async.waterfall([
+		function (cb) {
+			setupNetwork(targets,test,cb);
+		},
 		function (cb) {
 			startReflectors(targets,test,cb);
 		},
@@ -517,7 +561,8 @@ async.waterfall([
 		// next, we need to make a list of servers and assign IPs
 		toAssign = _.reduce(_.keys(activeDevs),function (result,item) {
 			// find out how many we need to assign
-			let missing = Math.max(2 - devices[item].ip_private_net.length,0);
+			let devHasIps = devices[item].ip_private_net, missing = Math.max(2 - devHasIps.length,0);
+			log(`${item}: has ips `+devHasIps.join(" "));
 			for (let i=0; i<missing; i++) {
 				result.push({device:item,address:usableIps.shift()+'/32'});
 			}
