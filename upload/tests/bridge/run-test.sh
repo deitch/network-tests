@@ -2,5 +2,13 @@
 
 set -e
 
-docker run --rm --net=bridge -p $6:$6 -p $6:$6/udp netperf netperf  -P 0 -H $1 -c -t $2_RR -l -$3 -v 2 -p $4 -- -k -r $5,$5 -P $6,$7
+TARGET=$1
+PROTOCOL=$2
+REPS=$3
+CONTROLPORT=$4
+SIZE=$5
+LOCALPORT=$6
+REMOTEPORT=$7
+
+docker run --rm -p $LOCALPORT:$LOCALPORT -p $LOCALPORT:$LOCALPORT/udp --net=bridge --name=netperf netperf netperf -P 0 -H $TARGET -c -t ${PROTOCOL}_RR -l -${REPS} -v 2 -p $CONTROLPORT -- -k -r ${SIZE},${SIZE} -P ${LOCALPORT},${REMOTEPORT}
 
