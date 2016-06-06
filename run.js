@@ -19,6 +19,8 @@ NETSERVERPORT = 7002,
 NETSERVERDATAPORT = 7003,
 NETSERVERLOCALPORT = 7004,
 REPETITIONS = 50000,
+// 8 for a /29
+PRIVATEIPCOUNT = 8,
 
 log = function (msg) {
 	let m = typeof(msg) === 'object' ? JSON.stringify(msg) : msg;
@@ -62,8 +64,8 @@ const genTestList = function (params) {
 setupNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net,
-		cmd = `network-tests/tests/${test}/setup-network.sh ${privateIps[0]} ${privateIps[1]}`;
+		let errCode = false, privateIps = devices[target].ip_private_net.join(" "),
+		cmd = `network-tests/tests/${test}/setup-network.sh ${privateIps}`;
 		var session = new ssh({
 			host: devices[target].ip_public.address,
 			user: "root",
@@ -152,8 +154,8 @@ getReflectorIp = function (targets,test,callback) {
 	let ips = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net,
-		cmd = `network-tests/tests/${test}/get-reflector-ip.sh ${privateIps[0]} ${privateIps[1]}`;
+		let errCode = false, privateIps = devices[target].ip_private_net.join(" "),
+		cmd = `network-tests/tests/${test}/get-reflector-ip.sh ${privateIps}`;
 		log(`${target}: getting reflector IP`);
 		log(cmd);
 		var session = new ssh({
@@ -184,7 +186,7 @@ getReflectorIp = function (targets,test,callback) {
 		});
 		session.on('close',function (hadError) {
 			if (!hadError && !errCode) {
-				log(target+": retrieved netserver IP "+ips[target]);
+				log(`${target}: retrieved netserver IP local:${ips[target].local} remote:${ips[target].remote}`);
 				cb(null);
 			}
 		});
@@ -213,7 +215,7 @@ runTests = function (tests,targets,msgPrefix,callback) {
 			key: pair.private
 		}),
 		cmd = `network-tests/tests/${t.test}/run-test.sh  ${target} ${t.protocol} ${t.reps} ${t.port} ${t.size} ${NETSERVERLOCALPORT} ${NETSERVERDATAPORT}`;
-		log(cmd);
+		log(`${t.from}: ${cmd}`);
 		session.exec(cmd, {
 			exit: function (code,stdout) {
 				if (code !== 0) {
@@ -511,7 +513,7 @@ async.waterfall([
 								// save my private IP
 								devices[name].ip_public = _.find(item.ip_addresses, {public:true,address_family:4,management:true});
 								devices[name].ip_private_mgmt = _.find(item.ip_addresses, {public:false,address_family:4,management:true}).address;
-								devices[name].ip_private_net = _.map(_.filter(item.ip_addresses,{public:false,address_family:4,management:false}),"address");
+								devices[name].ip_private_net = [];
 								// push those onto the private list
 								devices[name].ready = true;
 								waitingFor--;
@@ -550,46 +552,78 @@ async.waterfall([
 		// the total number required
 		let privateIpRange = _.find(res.ip_addresses,{address_family:4,public:false}),
 		cidr = new CIDR(), fullRange = cidr.list(privateIpRange.network+'/'+privateIpRange.cidr),
-		assigned = _.map(privateIpRange.assignments,"network"),
-		// we slice 10 because of a bug in how some of the addresses are assigned
-		usableIps = _.without.apply(_,[fullRange].concat(assigned)).slice(10),
-		// usableIps now contains a full list of usable IPs
+		assigned = privateIpRange.assignments,
+		// we want a /30 of 8 addresses for each host, so they can talk internally without a problem, but also speak to the other
+		ipStart = PRIVATEIPCOUNT*2,
+		
+		// usableIps contains the IPs we want
+		usableIps = fullRange.slice(ipStart,ipStart+PRIVATEIPCOUNT*_.keys(activeDevs).length),
+		// takenIps contains the subset of usableIps that are taken
+		takenIps = _.reduce(assigned,function (result,assign) {
+			if (_.indexOf(usableIps,assign.network) > -1) {
+				result.push(assign);
+			}
+			return result;
+		},[]),
 		
 		// next, we need to make a list of servers and assign IPs
-		toAssign = _.reduce(_.keys(activeDevs),function (result,item) {
-			// find out how many we need to assign
-			let devHasIps = devices[item].ip_private_net, missing = Math.max(2 - devHasIps.length,0);
-			log(`${item}: has ips `+devHasIps.join(" "));
-			for (let i=0; i<missing; i++) {
-				result.push({device:item,address:usableIps.shift()+'/32'});
+		toAssign = _.reduce(_.keys(activeDevs),function (result,item,index) {
+			let myIps = usableIps.slice(PRIVATEIPCOUNT*index,PRIVATEIPCOUNT*(index+1));
+			log(`${item}: will assign: ${myIps.join(" ")}`);
+			for (let i=0; i<myIps.length; i++) {
+				result.push({device:item,address:myIps[i]});
 			}
 			return result;
 		},[]);
 
+
+		// 1- free up any takenIps
+		// 2- assign the new IPs		
+
 		// we now have a list of servers and IPs to assign
-		
-		async.each(toAssign,function (entry,callback) {
-			log(entry.device+": assigning "+entry.address);
-			//closure to handle each correctly
-			(function(item,address) {
-				pkt.assignIp(devices[item].id,{address: address},function (err,data) {
-					if(err) {
-						log(item+": error assigning "+address);
-						log(err);
-						log(data);
-					} else {
-						log(item+": assigned "+address);
-						devices[item].ip_private_net.push(address);
-					}
-					callback(err);
+		async.series([
+			function (cb) {
+				log(`freeing up taken IPs`);
+				async.each(takenIps,function (ip,callback) {
+					log(`freeing up ${ip.address}`);
+					pkt.removeIp(ip.id,function (err,data) {
+						if(err) {
+							log("error releasing "+ip.address);
+							log(err);
+							log(data);
+						} else {
+							log("released "+ip.address);
+						}
+						callback(err);
+					});
+				},cb);
+			},
+			function (cb) {
+				log(`assigning IPs`);
+				async.each(toAssign,function (entry,callback) {
+					log(entry.device+": assigning "+entry.address);
+					//closure to handle each correctly
+					(function(item,address) {
+						pkt.assignIp(devices[item].id,{address: address},function (err,data) {
+							if(err) {
+								log(item+": error assigning "+address);
+								log(err);
+								log(data);
+							} else {
+								log(item+": assigned "+address);
+								devices[item].ip_private_net.push(address);
+							}
+							callback(err);
+						});
+					})(entry.device,entry.address);
+				},function (err) {
+					cb(err);
 				});
-			})(entry.device,entry.address);
-		},function (err) {
-			cb(err);
-		});
+			}
+		],cb);
 	},
 	// upload the scripts
-	function (cb) {
+	function (res,cb) {
 		log("uploading scripts");
 		async.each(_.keys(activeDevs), function (item,cb) {
 			// get the IP for the device
