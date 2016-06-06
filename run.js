@@ -72,7 +72,7 @@ setupNetwork = function (targets,test,callback) {
 			key: pair.private
 		});
 		// start the netserver container
-		log(cmd);
+		log(`${target}: ${cmd}`);
 		session.exec(cmd,{
 			exit: function (code) {
 				if (code !== 0) {
@@ -108,7 +108,7 @@ startReflectors = function (targets,test,callback) {
 	let targetIds = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false;
+		let errCode = false, script = `network-tests/tests/${test}/start-reflector.sh ${NETSERVERPORT} ${NETSERVERDATAPORT}`;
 		targetIds[target] = {};
 		var session = new ssh({
 			host: devices[target].ip_public.address,
@@ -116,8 +116,8 @@ startReflectors = function (targets,test,callback) {
 			key: pair.private
 		});
 		// start the netserver container
-		log(`network-tests/tests/${test}/start-reflector.sh ${NETSERVERPORT} ${NETSERVERDATAPORT}`);
-		session.exec(`network-tests/tests/${test}/start-reflector.sh ${NETSERVERPORT} ${NETSERVERDATAPORT}`,{
+		log(`${target}: ${script}`);
+		session.exec(script,{
 			exit: function (code,stdout) {
 				if (code !== 0) {
 					errCode = true;
@@ -157,7 +157,7 @@ getReflectorIp = function (targets,test,callback) {
 		let errCode = false, privateIps = devices[target].ip_private_net.join(" "),
 		cmd = `network-tests/tests/${test}/get-reflector-ip.sh ${privateIps}`;
 		log(`${target}: getting reflector IP`);
-		log(cmd);
+		log(`${atrget}: ${cmd}`);
 		var session = new ssh({
 			host: devices[target].ip_public.address,
 			user: "root",
@@ -245,6 +245,50 @@ runTests = function (tests,targets,msgPrefix,callback) {
 	},callback);
 },
 
+initializeTests = function (tests,targets,msgPrefix,callback) {
+	// this must be run in series so they don't impact each other
+	async.mapSeries(tests,function (t,cb) {
+		let msg = msgPrefix+" init-test: "+t.type+" "+t.protocol+" "+t.size, output,
+		target = targets[t.to].ip[t.type],
+		errCode = false;
+		log(t.from+": running "+msg);
+		// get the private IP for the device
+		let session = new ssh({
+			host: devices[t.from].ip_public.address,
+			user: "root",
+			key: pair.private
+		}),
+		cmd = `network-tests/tests/${t.test}/init-test.sh  ${target} ${t.protocol} ${t.reps} ${t.port} ${t.size} ${NETSERVERLOCALPORT} ${NETSERVERDATAPORT}`;
+		log(`${t.from}: ${cmd}`);
+		session.exec(cmd, {
+			exit: function (code,stdout) {
+				if (code !== 0) {
+					errCode = true;
+					session.end();
+					cb(t.from+": Failed to initialize test");
+				} else {
+					output = stdout;
+				}
+			}
+		})
+		;
+		session.on('error',function (err) {
+			log(t.from+": ssh error connecting for "+msg);
+			log(err);
+			session.end();
+			cb(t.from+": ssh connection failed");
+		});
+		session.on('close',function (hadError) {
+			if (!hadError && !errCode) {
+				log(t.from+": test initialized: "+msg);
+				// save the results from this test
+				cb(null,null);
+			}
+		});
+		session.start();
+	},callback);
+},
+
 stopReflectors = function (targets,test,callback) {
 	// stop the netserver reflectors
 	async.each(_.keys(targets),function (target,cb) {
@@ -308,6 +352,10 @@ runTestSuite = function (tests,test,callback) {
 			_.forEach(res,function (value,key) {
 				targetIds[key].ip = value;
 			});
+			initializeTests(tests,targetIds,test,cb);
+		},
+		function (res,cb) {
+			// we do not care about the results of initializeTests
 			runTests(tests,targetIds,test,cb);
 		},
 		function (res,cb) {
