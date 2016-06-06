@@ -104,6 +104,49 @@ setupNetwork = function (targets,test,callback) {
 	});
 },
 
+plumbNetwork = function (targets,test,callback) {
+	// now start the reflector on each
+	async.each(targets,function (target,cb) {
+		let errCode = false, privateIps = devices[target].ip_private_net.join(" "),
+		cmd = `network-tests/tests/${test}/plumb.sh ${privateIps}`;
+		var session = new ssh({
+			host: devices[target].ip_public.address,
+			user: "root",
+			key: pair.private
+		});
+		// start the netserver container
+		log(`${target}: ${cmd}`);
+		session.exec(cmd,{
+			exit: function (code) {
+				if (code !== 0) {
+					errCode = true;
+					session.end();
+					cb(target+": Failed to plumb network");
+				}
+			}
+		});
+		session.on('error',function (err) {
+			log(target+": ssh error connecting to plumb network");
+			log(err);
+			session.end();
+			cb(target+": ssh connection failed");
+		});
+		session.on('close',function (hadError) {
+			if (!hadError && !errCode) {
+				log(`${target}: network plumb successfully`);
+				cb(null);
+			}
+		});
+		session.start();
+	},function (err) {
+		if(err) {
+			callback(err);
+		} else {
+			callback(null);
+		}
+	});
+},
+
 startReflectors = function (targets,test,callback) {
 	let targetIds = {};
 	// now start the reflector on each
@@ -356,6 +399,9 @@ runTestSuite = function (tests,test,callback) {
 		},
 		function (res,cb) {
 			// we do not care about the results of initializeTests
+			plumbNetwork(targets,test,cb);
+		},
+		function (cb) {
 			runTests(tests,targetIds,test,cb);
 		},
 		function (res,cb) {
