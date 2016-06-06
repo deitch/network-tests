@@ -204,8 +204,11 @@ startReflectors = function (targets,test,callback) {
 		// start the netserver container
 		log(`${target}: ${script}`);
 		session.exec(script,{
-			exit: function (code,stdout) {
+			exit: function (code,stdout,stderr) {
 				if (code !== 0) {
+					log(`code: ${code}`);
+					log(stdout);
+					log(stderr);
 					errCode = true;
 					session.end();
 					cb(target+": Failed to start netserver");
@@ -261,6 +264,7 @@ getReflectorIp = function (targets,test,callback) {
 					// the stdout response should be a space separated list of IPs. The first is for local, the second is for remote
 					let ip = stdout.replace(/\s+/g," ").replace(/(^\s+|\s+$)/,'').split(/\s/);
 					ips[target] = {local:ip[0],remote:ip[1]};
+					log(`${target}: retrieved netserver IP local:${ips[target].local} remote:${ips[target].remote}`);
 				}
 			}
 		});
@@ -272,7 +276,7 @@ getReflectorIp = function (targets,test,callback) {
 		});
 		session.on('close',function (hadError) {
 			if (!hadError && !errCode) {
-				log(`${target}: retrieved netserver IP local:${ips[target].local} remote:${ips[target].remote}`);
+				log("get-reflector-ip session closed");
 				cb(null);
 			}
 		});
@@ -303,14 +307,20 @@ runTests = function (tests,targets,msgPrefix,callback) {
 		cmd = `network-tests/tests/${t.test}/run-test.sh  ${target} ${t.protocol} ${t.reps} ${t.port} ${t.size} ${NETSERVERLOCALPORT} ${NETSERVERDATAPORT}`;
 		log(`${t.from}: ${cmd}`);
 		session.exec(cmd, {
-			exit: function (code,stdout) {
+			exit: function (code,stdout,stderr) {
 				if (code !== 0) {
+					log(`code: ${code}`);
+					log(stdout);
+					log(stderr);
 					errCode = true;
 					session.end();
-					cb(t.from+": Failed to start netperf");
+					cb(t.from+": run-test failed");
 				} else {
 					output = stdout;
 				}
+			},
+			out: function (stdout) {
+				console.log(stdout);
 			}
 		})
 		;
@@ -414,7 +424,7 @@ runTestSuite = function (tests,test,callback) {
 	// need to start the reflector container on each target
 	
 	// find all of the targets
-	let targets = _.uniq(_.map(tests,"to")), targetIds = {}, allResults;
+	let targets = _.uniq(_.map(tests,"to")), allDevs = _.keys(activeDevs), targetIds = {}, allResults;
 	
 	// 1- create networks, if needed
 	// 2- start reflectors
@@ -424,7 +434,7 @@ runTestSuite = function (tests,test,callback) {
 	
 	async.waterfall([
 		function (cb) {
-			setupNetwork(targets,test,cb);
+			setupNetwork(allDevs,test,cb);
 		},
 		function (cb) {
 			startReflectors(targets,test,cb);
@@ -442,7 +452,7 @@ runTestSuite = function (tests,test,callback) {
 		},
 		function (res,cb) {
 			// we do not care about the results of initializeTests
-			plumbNetwork(targets,test,cb);
+			plumbNetwork(allDevs,test,cb);
 		},
 		function (cb) {
 			runTests(tests,targetIds,test,cb);
@@ -452,7 +462,7 @@ runTestSuite = function (tests,test,callback) {
 			stopReflectors(targetIds,test,cb);
 		},
 		function (cb) {
-			teardownNetwork(targets,test,cb);
+			teardownNetwork(allDevs,test,cb);
 		}
 	],function (err) {
 		callback(err,allResults);
@@ -744,6 +754,7 @@ async.waterfall([
 					log(entry.device+": assigning "+entry.address);
 					//closure to handle each correctly
 					(function(item,address) {
+						devices[item].ip_private_net.push(address);
 						pkt.assignIp(devices[item].id,{address: address},function (err,data) {
 							if(err) {
 								log(item+": error assigning "+address);
@@ -751,7 +762,6 @@ async.waterfall([
 								log(data);
 							} else {
 								log(item+": assigned "+address);
-								devices[item].ip_private_net.push(address);
 							}
 							callback(err);
 						});
@@ -868,7 +878,7 @@ async.waterfall([
 	// and capture the output
 	function (results,cb) {
 		// save the results
-		log("host tests complete");
+		log("metal tests complete");
 		totalResults.push.apply(totalResults,results||[]);
 
 
