@@ -157,7 +157,7 @@ getReflectorIp = function (targets,test,callback) {
 		let errCode = false, privateIps = devices[target].ip_private_net.join(" "),
 		cmd = `network-tests/tests/${test}/get-reflector-ip.sh ${privateIps}`;
 		log(`${target}: getting reflector IP`);
-		log(`${atrget}: ${cmd}`);
+		log(`${target}: ${cmd}`);
 		var session = new ssh({
 			host: devices[target].ip_public.address,
 			user: "root",
