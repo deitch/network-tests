@@ -318,9 +318,6 @@ runTests = function (tests,targets,msgPrefix,callback) {
 				} else {
 					output = stdout;
 				}
-			},
-			out: function (stdout) {
-				console.log(stdout);
 			}
 		})
 		;
