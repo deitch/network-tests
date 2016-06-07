@@ -60,6 +60,48 @@ const genTestList = function (params) {
 	return tests;
 },
 
+installSoftware = function (targets,test,callback) {
+	// now start the reflector on each
+	async.each(targets,function (target,cb) {
+		let errCode = false,
+		cmd = `network-tests/tests/${test}/install-software.sh`;
+		var session = new ssh({
+			host: devices[target].ip_public.address,
+			user: "root",
+			key: pair.private
+		});
+		// start the netserver container
+		log(`${target}: ${cmd}`);
+		session.exec(cmd,{
+			exit: function (code) {
+				if (code !== 0) {
+					errCode = true;
+					session.end();
+					cb(target+": Failed to install test software");
+				}
+			}
+		});
+		session.on('error',function (err) {
+			log(target+": ssh error connecting to install test software");
+			log(err);
+			session.end();
+			cb(target+": ssh connection failed");
+		});
+		session.on('close',function (hadError) {
+			if (!hadError && !errCode) {
+				log(`${target}: test software installed successfully`);
+				cb(null);
+			}
+		});
+		session.start();
+	},function (err) {
+		if(err) {
+			callback(err);
+		} else {
+			callback(null);
+		}
+	});
+},
 
 setupNetwork = function (targets,test,callback) {
 	// now start the reflector on each
@@ -433,6 +475,9 @@ runTestSuite = function (tests,test,callback) {
 	// 5- remove networks
 	
 	async.waterfall([
+		function (cb) {
+			installSoftware(allDevs,test,cb);
+		},
 		function (cb) {
 			setupNetwork(allDevs,test,cb);
 		},
