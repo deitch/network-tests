@@ -255,9 +255,12 @@ getReflectorIp = function (targets,test,callback) {
 		// get the reflector IP
 
 		session.exec(cmd,{
-			exit: function (code,stdout) {
+			exit: function (code,stdout,stderr) {
 				if (code !== 0) {
 					errCode = true;
+					log(`code: ${code}`);
+					log(stdout);
+					log(stderr);
 					session.end();
 					cb(target+": Failed to get netserver IP");
 				} else {
