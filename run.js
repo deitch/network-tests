@@ -106,8 +106,8 @@ installSoftware = function (targets,test,callback) {
 setupNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net.join(" "),
-		cmd = `network-tests/tests/${test}/setup-network.sh ${privateIps}`;
+		let errCode = false, privateIps = devices[target].ip_private_net.join(","),
+		cmd = `network-tests/tests/${test}/setup-network.sh --ips ${privateIps}`;
 		var session = new ssh({
 			host: devices[target].ip_public.address,
 			user: "root",
@@ -149,8 +149,8 @@ setupNetwork = function (targets,test,callback) {
 teardownNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net.join(" "),
-		cmd = `network-tests/tests/${test}/teardown-network.sh ${privateIps}`;
+		let errCode = false, privateIps = devices[target].ip_private_net.join(","),
+		cmd = `network-tests/tests/${test}/teardown-network.sh --ips ${privateIps}`;
 		var session = new ssh({
 			host: devices[target].ip_public.address,
 			user: "root",
@@ -192,8 +192,8 @@ teardownNetwork = function (targets,test,callback) {
 plumbNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net.join(" "),
-		cmd = `network-tests/tests/${test}/plumb.sh ${privateIps}`;
+		let errCode = false, privateIps = devices[target].ip_private_net.join(","),
+		cmd = `network-tests/tests/${test}/plumb.sh --ips ${privateIps}`;
 		var session = new ssh({
 			host: devices[target].ip_public.address,
 			user: "root",
@@ -236,7 +236,7 @@ startReflectors = function (targets,test,callback) {
 	let targetIds = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, script = `network-tests/tests/${test}/start-reflector.sh ${NETSERVERPORT} ${NETSERVERDATAPORT}`;
+		let errCode = false, script = `network-tests/tests/${test}/start-reflector.sh --port ${NETSERVERPORT} --dataport ${NETSERVERDATAPORT}`;
 		targetIds[target] = {};
 		var session = new ssh({
 			host: devices[target].ip_public.address,
@@ -285,8 +285,8 @@ getReflectorIp = function (targets,test,callback) {
 	let ips = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net.join(" "),
-		cmd = `network-tests/tests/${test}/get-reflector-ip.sh ${privateIps}`;
+		let errCode = false, privateIps = devices[target].ip_private_net.join(","),
+		cmd = `network-tests/tests/${test}/get-reflector-ip.sh --ips ${privateIps}`;
 		log(`${target}: getting reflector IP`);
 		log(`${target}: ${cmd}`);
 		var session = new ssh({
@@ -349,7 +349,7 @@ runTests = function (tests,targets,msgPrefix,callback) {
 			user: "root",
 			key: pair.private
 		}),
-		cmd = `network-tests/tests/${t.test}/run-test.sh  ${target} ${t.protocol} ${t.reps} ${t.port} ${t.size} ${NETSERVERLOCALPORT} ${NETSERVERDATAPORT}`;
+		cmd = `network-tests/tests/${t.test}/run-test.sh  --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
 		log(`${t.from}: ${cmd}`);
 		session.exec(cmd, {
 			exit: function (code,stdout,stderr) {
@@ -396,7 +396,7 @@ initializeTests = function (tests,targets,msgPrefix,callback) {
 			user: "root",
 			key: pair.private
 		}),
-		cmd = `network-tests/tests/${t.test}/init-test.sh  ${target} ${t.protocol} ${t.reps} ${t.port} ${t.size} ${NETSERVERLOCALPORT} ${NETSERVERDATAPORT}`;
+		cmd = `network-tests/tests/${t.test}/init-test.sh  --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
 		log(`${t.from}: ${cmd}`);
 		session.exec(cmd, {
 			exit: function (code,stdout) {
