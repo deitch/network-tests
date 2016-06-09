@@ -5,10 +5,13 @@ set -e
 # set up network with private IPs for host 
 # for bridge without NAT, we need to set up an individual bridge
 
-IP1=$1
-IP2=$2
-IP3=$3
-IP4=$4
+COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
+. $COMMON/getoption
+
+IP1=${PRIVATEIPS[0]}
+IP2=${PRIVATEIPS[1]}
+IP3=${PRIVATEIPS[2]}
+IP4=${PRIVATEIPS[3]}
 
 # tear down the bridge
 # make sure it does not already exist
