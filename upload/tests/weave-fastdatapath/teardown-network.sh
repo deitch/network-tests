@@ -7,14 +7,10 @@ COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
 
 # stop weave
 weave stop
+weave reset
 
-# remove firwall ports
-iptables -D FORWARD -p tcp --dport 6783 -j ACCEPT
-iptables -D FORWARD -p tcp --dport 6784 -j ACCEPT
-iptables -D FORWARD -p udp --dport 6784 -j ACCEPT
+# remove firewall ports
+IPRANGE=192.168.0.0/16
 
-iptables -D FORWARD -p tcp --dport $NETSERVERPORT -j ACCEPT
-iptables -D FORWARD -p tcp --dport $LOCALPORT -j ACCEPT
-iptables -D FORWARD -p udp --dport $LOCALPORT -j ACCEPT
-iptables -D FORWARD -p tcp --dport $REMOTEPORT -j ACCEPT
-iptables -D FORWARD -p udp --dport $REMOTEPORT -j ACCEPT
+# open the firewall ports necessary
+firewall-cmd --zone=trusted --remove-source=$IPRANGE
