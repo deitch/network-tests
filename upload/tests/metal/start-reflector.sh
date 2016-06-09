@@ -2,5 +2,9 @@
 
 set -e
 
-netserver -p $1 >/dev/null
+COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
+. $COMMON/getoption
+
+
+netserver -p $NETSERVERPORT >/dev/null
 pgrep netserver

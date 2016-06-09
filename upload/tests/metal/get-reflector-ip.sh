@@ -2,10 +2,11 @@
 
 set -e
 
-IP1=$1
-IP2=$2
+COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
 
-localIP=$IP2
-remoteIP=$IP2
+. $COMMON/getoption
+
+localIP=${PRIVATEIPS[1]}
+remoteIP=${PRIVATEIPS[1]}
 
 echo $localIP $remoteIP
