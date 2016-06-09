@@ -6,8 +6,11 @@ set -e
 # for net=bridge, simply put both addresses on lo
 # because of port mapping, it will work just fine
 
-IP1=$1
-IP2=$2
+COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
+. $COMMON/getoption
+
+IP1=${PRIVATEIPS[0]}
+IP2=${PRIVATEIPS[1]}
 
 # need to check each address
 if ip addr show lo | grep -wq $IP1 ; then

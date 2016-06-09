@@ -2,10 +2,10 @@
 
 set -e
 
-IP1=$1
-IP2=$2
+COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
+. $COMMON/getoption
 
 localIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' netserver)
-remoteIP=$IP2
+remoteIP=${PRIVATEIPS[1]}
 
 echo $localIP $remoteIP
