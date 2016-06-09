@@ -60,6 +60,7 @@ while [[ $# > 0 ]]; do
         --dataport)       # Takes an option argument, ensuring it has been specified.
             if [ -n "$2" ]; then
                 REMOTEPORT=$2
+                NETSERVERDATAPORT=$2
                 shift
             else
                 printf 'ERROR: "--dataport" requires a non-empty option argument.\n' >&2
