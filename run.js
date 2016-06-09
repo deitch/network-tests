@@ -111,7 +111,7 @@ setupNetwork = function (targets,test,callback) {
 		mytype = devices[target].type, purpose = devices[target].purpose === "target" ? "source" : "target",
 		peerName = _.keys(_.pickBy(devices,{purpose:purpose, type:mytype}))[0],
 		peer = devices[peerName].ip_private_mgmt,
-		cmd = `network-tests/tests/${test}/setup-network.sh --ips ${privateIps} --peer ${peer}`;
+		cmd = `network-tests/tests/${test}/setup-network.sh --ips ${privateIps} --peer ${peer} --port ${NETSERVERPORT} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
 		var session = new ssh({
 			host: devices[target].ip_public.address,
 			user: "root",
@@ -154,7 +154,7 @@ teardownNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
 		let errCode = false, privateIps = devices[target].ip_private_net.join(","),
-		cmd = `network-tests/tests/${test}/teardown-network.sh --ips ${privateIps}`;
+		cmd = `network-tests/tests/${test}/teardown-network.sh --ips ${privateIps} --port ${NETSERVERPORT} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
 		var session = new ssh({
 			host: devices[target].ip_public.address,
 			user: "root",
