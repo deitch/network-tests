@@ -106,8 +106,12 @@ installSoftware = function (targets,test,callback) {
 setupNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
+		// how do I find my peer? I find my type from devices, then all of the same type, then exclude myself
 		let errCode = false, privateIps = devices[target].ip_private_net.join(","),
-		cmd = `network-tests/tests/${test}/setup-network.sh --ips ${privateIps}`;
+		mytype = devices[target].type, purpose = devices[target].purpose === "target" ? "source" : "target",
+		peerName = _.keys(_.pickBy(devices,{purpose:purpose, type:mytype}))[0],
+		peer = devices[peerName].ip_private_mgmt,
+		cmd = `network-tests/tests/${test}/setup-network.sh --ips ${privateIps} --peer ${peer}`;
 		var session = new ssh({
 			host: devices[target].ip_public.address,
 			user: "root",
