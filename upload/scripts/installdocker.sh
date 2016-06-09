@@ -8,4 +8,5 @@ else
 	curl -fsSL https://get.docker.com/ | sh
 fi
 
-service docker start
+systemctl docker start
+
