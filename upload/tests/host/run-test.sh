@@ -2,5 +2,8 @@
 
 set -e
 
-docker run --rm --net=host netperf netperf  -P 0 -H $1 -c -t $2_RR -l -$3 -v 2 -p $4 -- -k -r $5,$5 -P $6,$7
+COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
+. $COMMON/getoption
+
+docker run --rm --net=host netperf netperf  -P 0 -H $TARGET -c -t ${PROTOCOL}_RR -l -${REPS} -v 2 -p $CONTROLPORT -- -k -r ${SIZE},${SIZE} -P ${LOCALPORT},${REMOTEPORT}
 
