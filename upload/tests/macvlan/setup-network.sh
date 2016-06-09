@@ -1,10 +1,13 @@
 #!/bin/bash
 
-# get the IP of the management private IP
-IP1=$1
-IP3=$2
-IP4=$3
-IP4=$4
+
+COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
+. $COMMON/getoption
+
+IP1=${PRIVATEIPS[0]}
+IP2=${PRIVATEIPS[1]}
+IP3=${PRIVATEIPS[2]}
+IP4=${PRIVATEIPS[3]}
 
 nic=team0
 

@@ -2,10 +2,13 @@
 
 set -e
 
-IP1=$1
-IP2=$2
-IP3=$3
-IP4=$4
+COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
+. $COMMON/getoption
+
+IP1=${PRIVATEIPS[0]}
+IP2=${PRIVATEIPS[1]}
+IP3=${PRIVATEIPS[2]}
+IP4=${PRIVATEIPS[3]}
 
 # IP1 is used for the network
 # IP2 is unused
