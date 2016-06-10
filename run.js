@@ -531,7 +531,9 @@ OPTIONS:
 	--size <size>: test packets of size <size>, an integer. May be invoked multiple times. Default is all of: ${SIZES.join(" ")}
 	--test <test>: test to perform. May be invoked multiple times. Default is all of: ${TESTS.join(" ")}
 	--network <network>: network test to perform. May be invoked multiple times. Default is all of: ${NETWORKS.join(" ")}
-	--keep: do not destroy servers or project at end of test run
+	--keep: do not destroy servers or project at end of test run, in which case you will have to destroy them manually
+	
+	Will try to reuse existing project named ${projName} if it exists, else it will create it. 
 	`
 	;
 	console.log(msg);
