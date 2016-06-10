@@ -76,6 +76,15 @@ while [[ $# > 0 ]]; do
                 exit 1
             fi
             ;;
+        --peername)       # Takes an option argument, ensuring it has been specified.
+            if [ -n "$2" ]; then
+                PEERNAME=$2
+                shift
+            else
+                printf 'ERROR: "--peername" requires a non-empty option argument.\n' >&2
+                exit 1
+            fi
+            ;;
         --port)       # Takes an option argument, ensuring it has been specified.
             if [ -n "$2" ]; then
                 NETSERVERPORT=$2
