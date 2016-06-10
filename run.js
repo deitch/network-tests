@@ -9,7 +9,7 @@ argv = require('minimist')(process.argv.slice(2));
 const TOKEN = fs.readFileSync('token').toString().replace(/\n/,''), pkt = new Packet(TOKEN),
 SSHFILE = './keys',
 PROJDATE = new Date().toISOString(),
-projName = "ULL-network-performance-test-"+PROJDATE,
+projName = "ULL-network-performance-test",
 SIZES = [300,500,1024,2048],
 PROTOCOLS = ['TCP','UDP'],
 TESTS = _.filter(fs.readdirSync('./upload/tests'),function(item) { return item.indexOf('.') !== 0;}),
@@ -531,7 +531,6 @@ OPTIONS:
 	--size <size>: test packets of size <size>, an integer. May be invoked multiple times. Default is all of: ${SIZES.join(" ")}
 	--test <test>: test to perform. May be invoked multiple times. Default is all of: ${TESTS.join(" ")}
 	--network <network>: network test to perform. May be invoked multiple times. Default is all of: ${NETWORKS.join(" ")}
-	--project <project>: use existing project ID <project> instead of creating new one
 	--keep: do not destroy servers or project at end of test run
 	`
 	;
@@ -550,7 +549,7 @@ OPTIONS:
 // default:
 //		software: install
 //		tests: run
-var projId = argv.project || null,
+var projId,
 activeTypes = _.uniq([].concat(argv.type || [])),
 activeDevs = _.reduce(devices,function (active,value,item) {
 	if (activeTypes.length === 0 || _.indexOf(activeTypes,value.type) > -1) {
@@ -597,29 +596,19 @@ if (fs.existsSync(SSHFILE)) {
 
 
 async.waterfall([
-	// if asked for existing project, see if it exists
+	// get list of projects and see if the one we want already exists
 	function (cb) {
-		if (projId) {
-			pkt.getProjects(projId,{},function (err,data) {
-				if (err || !data || !data.id) {
-					let msg = "FAIL: cannot use project "+projId+" which does not exist";
-					log(msg);
-					cb(msg);
-				} else {
-					cb(null);
-				}
-			});
-		} else {
-			cb(null);
-		}
+		pkt.getProjects(null,{},cb);
 	},
-	// create a new project
-	function (cb) {
-		if (!projId) {
+	function (res,cb) {
+		// is there a project with our targeted name? if so, use it
+		const targetProj = _.find(res.projects,{name:projName});
+		if (!targetProj) {
 			log("creating new project");
 			pkt.addProject({name:projName},cb);
 		} else {
-			log("reusing existing project");
+			projId = targetProj.id;
+			log("reusing existing project "+projId);
 			cb(null,{id:projId});
 		}
 	},
