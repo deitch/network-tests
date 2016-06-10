@@ -60,6 +60,12 @@ const genTestList = function (params) {
 	return tests;
 },
 
+getPeerName = function (item) {
+	let mytype = devices[item].type, purpose = devices[item].purpose === "target" ? "source" : "target",
+	peerName = _.keys(_.pickBy(devices,{purpose:purpose, type:mytype}))[0];
+	return peerName;
+},
+
 installSoftware = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
@@ -108,8 +114,7 @@ setupNetwork = function (targets,test,callback) {
 	async.each(targets,function (target,cb) {
 		// how do I find my peer? I find my type from devices, then all of the same type, then exclude myself
 		let errCode = false, privateIps = devices[target].ip_private_net.join(","),
-		mytype = devices[target].type, purpose = devices[target].purpose === "target" ? "source" : "target",
-		peerName = _.keys(_.pickBy(devices,{purpose:purpose, type:mytype}))[0],
+		peerName = getPeerName(target),
 		peer = devices[peerName].ip_private_mgmt,
 		cmd = `network-tests/tests/${test}/setup-network.sh --ips ${privateIps} --peer ${peer} --port ${NETSERVERPORT} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
 		var session = new ssh({
@@ -610,14 +615,14 @@ async.waterfall([
 			pkt.addProject({name:projName},cb);
 		} else {
 			projId = targetProj.id;
-			log("reusing existing project "+projId);
+			log(`reusing existing project ${projName} ${projId}`);
 			cb(null,{id:projId});
 		}
 	},
 	// check if this keypair exists or add it
 	function (res,cb) {
 		projId = res.id;
-		log("project ready: "+projId);
+		log(`project ready: ${projId}`);
 		pkt.getSshkeys(false,cb);
 	},
 	function (res,cb) {
@@ -846,7 +851,9 @@ async.waterfall([
 		log("installing software");
 		async.each(_.keys(activeDevs), function (item,cb) {
 			// get the private IP for the device
-			let ipaddr = devices[item].ip_public.address;
+			let ipaddr = devices[item].ip_public.address,
+			peerName = getPeerName(item),
+			peer = devices[peerName].ip_private_mgmt;
 			log(item+": installing software on "+ipaddr);
 			var session = new ssh({
 				host: ipaddr,
@@ -854,19 +861,33 @@ async.waterfall([
 				key: pair.private
 			});
 			session
-				.exec('network-tests/scripts/installnetperf.sh',{
+				.exec(`network-tests/scripts/01-installetcd.sh --peer ${peer} --peername ${peerName}`,{
 					exit: function (code) {
 						if (code !== 0) {
-							log(item+": Failed to install netperf");
+							log(item+": Failed to install etcd");
 							session.end();
+						} else {
+							log(`${item}: etcd installed`);
 						}
 					}
 				})
-				.exec('network-tests/scripts/installdocker.sh',{
+				.exec('network-tests/scripts/02-installdocker.sh',{
 					exit: function (code) {
 						if (code !== 0) {
 							log(item+": Failed to install docker");
 							session.end();
+						} else {
+							log(`${item}: docker installed`);
+						}
+					}
+				})
+				.exec('network-tests/scripts/03-installnetperf.sh',{
+					exit: function (code) {
+						if (code !== 0) {
+							log(item+": Failed to install netperf");
+							session.end();
+						} else {
+							log(`${item}: netperf installed`);
 						}
 					}
 				})
