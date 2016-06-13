@@ -17,11 +17,14 @@ systemctl stop docker
 # restart docker daemon with 
 # --cluster-store=etcd://<ETCD IP>:2379
 mkdir -p /etc/systemd/system/docker.service.d/
-cat > /etc/systemd/system/docker.service.d/override.conf <<EOF
+CONF_FILE=/etc/systemd/system/docker.service.d/override.conf
+cat > $CONF_FILE <<EOF
 [Service]
 ExecStart=
 ExecStart=/usr/bin/docker daemon --cluster-store etcd://127.0.0.1:2379 -H fd://
 EOF
+
+cp $CONF_FILE $CONF_FILE.clean
 
 systemctl daemon-reload
 systemctl start docker
