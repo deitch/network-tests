@@ -19,7 +19,11 @@ etcdctl set /coreos.com/network/config '{ "Network": "'$IPRANGE'", "Backend":{"T
 
 
 # launch flannel on every host
-(flanneld &)
+nic=team0
+# get our management IP
+mgmt=$(ip addr show $nic | awk '/10\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+/ {print $2}')
+mgmt=${mgmt%%/*}
+(flanneld --public-ip $mgmt --iface $mgmt &)
 
 # restart the docker engine with the right bip
 systemctl stop docker
