@@ -862,9 +862,11 @@ async.waterfall([
 			});
 			session
 				.exec(`network-tests/scripts/01-installetcd.sh --peer ${peer} --peername ${peerName}`,{
-					exit: function (code) {
+					exit: function (code,stdout,stderr) {
 						if (code !== 0) {
 							log(item+": Failed to install etcd");
+							log(stdout);
+							log(stderr);
 							session.end();
 						} else {
 							log(`${item}: etcd installed`);
