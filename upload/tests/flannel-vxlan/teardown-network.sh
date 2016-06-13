@@ -28,4 +28,8 @@ fi
 systemctl daemon-reload
 systemctl start docker
 
+# remove any old routes
+ip ro | awk '/flannel/ {print $1 $2 $3}' | while read line; do 
+	ip del $line
+done
 

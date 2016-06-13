@@ -17,6 +17,11 @@ firewall-cmd --zone=trusted --add-source=$IPRANGE
 
 etcdctl set /coreos.com/network/config '{ "Network": "'$IPRANGE'", "Backend":{"Type":"vxlan"} }'
 
+# clear out any old routes
+ip ro | awk '/flannel/ {print $1 $2 $3}' | while read line; do 
+	ip del $line
+done
+
 
 # launch flannel on every host
 nic=team0
