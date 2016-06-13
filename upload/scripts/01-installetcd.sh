@@ -6,29 +6,43 @@ COMMON=$(dirname "${BASH_SOURCE[0]}")/../common
 . $COMMON/getoption
 
 # do we already have etcd?
-ETCD=/usr/local/bin/etcd
-ETCDCTL=/usr/local/bin/etcdctl
-if [[ ! -e $ETCD || ! -e $ETCDCTL ]]; then
-	RELEASE=etcd-v2.3.6-linux-amd64
-	curl -L  https://github.com/coreos/etcd/releases/download/v2.3.6/$RELEASE.tar.gz -o $RELEASE.tar.gz
-	tar xzvf $RELEASE.tar.gz
-	cp $RELEASE/etcd $ETCD
-	cp $RELEASE/etcdctl $ETCDCTL
-	chmod +x $ETCD $ETCDCTL
+if command -v "docker" > /dev/null 2>&1; then
+	yum update etcd
+else 
+	yum install -y etcd
 fi
+
 
 nic=team0
 # get our management IP
 HOSTNAME=$(hostname)
 mgmt=$(ip addr show $nic | awk '/10\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+/ {print $2}')
 mgmt=${mgmt%%/*}
+# clean up anything old
+DATA_DIR=/var/lib/etcd/default.etcd
+CONF_FILE=/etc/etcd/etcd.conf
 
 # make sure no existing etcd is running
-pkill -x etcd || true
-/bin/rm -rf /tmp/data.etcd
-CMD="etcd --data-dir /tmp/data.etcd --listen-peer-urls http://0.0.0.0:2380 --initial-cluster $HOSTNAME=http://$mgmt:2380,$PEERNAME=http://$PEER:2380 --name $HOSTNAME --initial-advertise-peer-urls http://$mgmt:2380 --initial-cluster-state new"
-nohup $CMD > /tmp/etcd.out 2>&1 &
+systemctl stop etcd
 
-pgrep etcd || true
-cat /tmp/etcd.out || true
+/bin/rm -rf $DATA_DIR
 
+cat > $CONF_FILE <<EOF
+[member]
+ETCD_NAME=$HOSTNAME
+ETCD_DATA_DIR="$DATA_DIR"
+ETCD_LISTEN_PEER_URLS="http://0.0.0.0:2380"
+ETCD_LISTEN_CLIENT_URLS="http://0.0.0.0:2379"
+#
+[cluster]
+ETCD_INITIAL_ADVERTISE_PEER_URLS="http://$mgmt:2380"
+ETCD_INITIAL_CLUSTER="$HOSTNAME=http://$mgmt:2380,$PEERNAME=http://$PEER:2380"
+ETCD_INITIAL_CLUSTER_STATE="new"
+ETCD_ADVERTISE_CLIENT_URLS="http://$mgmt:2379"
+
+EOF
+
+# keep a clean backup copy
+cp $CONF_FILE $CONF_FILE.clean
+
+systemctl start etcd
