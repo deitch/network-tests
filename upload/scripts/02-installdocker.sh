@@ -24,6 +24,10 @@ systemctl stop docker
 mkdir -p /etc/systemd/system/docker.service.d/
 CONF_FILE=/etc/systemd/system/docker.service.d/override.conf
 cat > $CONF_FILE <<EOF
+[Unit]
+After=network.target docker.socket etcd.service
+Requires=etcd.service docker.socket
+
 [Service]
 ExecStart=
 ExecStart=/usr/bin/docker daemon --cluster-store etcd://127.0.0.1:2379 --cluster-advertise $mgmt:0 -H fd://
