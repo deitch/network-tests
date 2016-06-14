@@ -125,8 +125,11 @@ setupNetwork = function (targets,test,callback) {
 		// start the netserver container
 		log(`${target}: ${cmd}`);
 		session.exec(cmd,{
-			exit: function (code) {
+			exit: function (code,stdout,stderr) {
 				if (code !== 0) {
+					log(`code: ${code}`);
+					log(stdout);
+					log(stderr);
 					errCode = true;
 					session.end();
 					cb(target+": Failed to setup network");
@@ -168,8 +171,11 @@ teardownNetwork = function (targets,test,callback) {
 		// start the netserver container
 		log(`${target}: ${cmd}`);
 		session.exec(cmd,{
-			exit: function (code) {
+			exit: function (code,stdout,stderr) {
 				if (code !== 0) {
+					log(`code: ${code}`);
+					log(stdout);
+					log(stderr);
 					errCode = true;
 					session.end();
 					cb(target+": Failed to tear down network");
