@@ -13,11 +13,6 @@ fi
 calicoctl node stop
 calicoctl node remove
 
-# stop etcd and remove old data
-pkill etcd
-rm -rf /tmp/data.etcd
-
-
 
 # remove firewall ports
 IPRANGE=192.168.0.0/16
