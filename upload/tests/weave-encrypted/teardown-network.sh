@@ -6,7 +6,6 @@ COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
 . $COMMON/getoption
 
 # stop weave
-weave stop
 weave reset
 
 # remove firewall ports
