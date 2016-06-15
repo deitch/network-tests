@@ -204,54 +204,12 @@ teardownNetwork = function (targets,test,callback) {
 	});
 },
 
-plumbNetwork = function (targets,test,callback) {
-	// now start the reflector on each
-	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net.join(","),
-		cmd = `network-tests/tests/${test}/plumb.sh --ips ${privateIps}`;
-		var session = new ssh({
-			host: devices[target].ip_public.address,
-			user: "root",
-			key: pair.private
-		});
-		// start the netserver container
-		log(`${target}: ${cmd}`);
-		session.exec(cmd,{
-			exit: function (code) {
-				if (code !== 0) {
-					errCode = true;
-					session.end();
-					cb(target+": Failed to plumb network");
-				}
-			}
-		});
-		session.on('error',function (err) {
-			log(target+": ssh error connecting to plumb network");
-			log(err);
-			session.end();
-			cb(target+": ssh connection failed");
-		});
-		session.on('close',function (hadError) {
-			if (!hadError && !errCode) {
-				log(`${target}: network plumb successfully`);
-				cb(null);
-			}
-		});
-		session.start();
-	},function (err) {
-		if(err) {
-			callback(err);
-		} else {
-			callback(null);
-		}
-	});
-},
-
 startReflectors = function (targets,test,callback) {
 	let targetIds = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, script = `network-tests/tests/${test}/start-reflector.sh --port ${NETSERVERPORT} --dataport ${NETSERVERDATAPORT}`;
+		let errCode = false, privateIps = devices[target].ip_private_net.join(","),
+		script = `network-tests/tests/${test}/start-reflector.sh --ips ${privateIps} --port ${NETSERVERPORT} --dataport ${NETSERVERDATAPORT}`;
 		targetIds[target] = {};
 		var session = new ssh({
 			host: devices[target].ip_public.address,
@@ -364,7 +322,8 @@ runTests = function (tests,targets,msgPrefix,callback) {
 			user: "root",
 			key: pair.private
 		}),
-		cmd = `network-tests/tests/${t.test}/run-test.sh  --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
+		privateIps = devices[t.from].ip_private_net.join(","),
+		cmd = `network-tests/tests/${t.test}/run-test.sh  --ips ${privateIps} --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
 		log(`${t.from}: ${cmd}`);
 		session.exec(cmd, {
 			exit: function (code,stdout,stderr) {
@@ -392,50 +351,6 @@ runTests = function (tests,targets,msgPrefix,callback) {
 				log(t.from+": test complete: "+msg);
 				// save the results from this test
 				cb(null,_.extend({},t,{results:output}));
-			}
-		});
-		session.start();
-	},callback);
-},
-
-initializeTests = function (tests,targets,msgPrefix,callback) {
-	// this must be run in series so they don't impact each other
-	async.mapSeries(tests,function (t,cb) {
-		let msg = msgPrefix+" init-test: "+t.type+" "+t.protocol+" "+t.size, output,
-		target = targets[t.to].ip[t.type],
-		errCode = false;
-		log(t.from+": running "+msg);
-		// get the private IP for the device
-		let session = new ssh({
-			host: devices[t.from].ip_public.address,
-			user: "root",
-			key: pair.private
-		}),
-		cmd = `network-tests/tests/${t.test}/init-test.sh  --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
-		log(`${t.from}: ${cmd}`);
-		session.exec(cmd, {
-			exit: function (code,stdout) {
-				if (code !== 0) {
-					errCode = true;
-					session.end();
-					cb(t.from+": Failed to initialize test");
-				} else {
-					output = stdout;
-				}
-			}
-		})
-		;
-		session.on('error',function (err) {
-			log(t.from+": ssh error connecting for "+msg);
-			log(err);
-			session.end();
-			cb(t.from+": ssh connection failed");
-		});
-		session.on('close',function (hadError) {
-			if (!hadError && !errCode) {
-				log(t.from+": test initialized: "+msg);
-				// save the results from this test
-				cb(null,null);
 			}
 		});
 		session.start();
@@ -508,13 +423,6 @@ runTestSuite = function (tests,test,callback) {
 			_.forEach(res,function (value,key) {
 				targetIds[key].ip = value;
 			});
-			initializeTests(tests,targetIds,test,cb);
-		},
-		function (res,cb) {
-			// we do not care about the results of initializeTests
-			plumbNetwork(allDevs,test,cb);
-		},
-		function (cb) {
 			runTests(tests,targetIds,test,cb);
 		},
 		function (res,cb) {
