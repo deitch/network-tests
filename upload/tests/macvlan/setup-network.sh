@@ -4,11 +4,6 @@
 COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
 . $COMMON/getoption
 
-IP1=${PRIVATEIPS[0]}
-IP2=${PRIVATEIPS[1]}
-IP3=${PRIVATEIPS[2]}
-IP4=${PRIVATEIPS[3]}
-
 nic=team0
 
 # get our management IP

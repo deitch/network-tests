@@ -12,10 +12,12 @@ IP4=${PRIVATEIPS[3]}
 
 mgmt=$(awk '{print $1}' /tmp/private_management_ip )
 gateway=$(awk '{print $2}' /tmp/private_management_ip )
+hostname=$(hostname)
+devtype=${hostname%%[0-9]*}
 
 
 
-docker run -it -d --net=none --name=netperf netperf sh
+docker run -t -d --net=none --name=netperf netperf sh
 
 pid=$(docker inspect -f '{{ .State.Pid }}' netperf)
 

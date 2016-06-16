@@ -15,6 +15,8 @@ devtype=${hostname%%[0-9]*}
 
 mgmt=$(awk '{print $1}' /tmp/private_management_ip )
 gateway=$(awk '{print $2}' /tmp/private_management_ip )
+hostname=$(hostname)
+devtype=${hostname%%[0-9]*}
 
 
 mkdir -p /var/run/netns
@@ -25,11 +27,6 @@ docker run $PORTLINE --net=none -d --name=netserver netperf netserver -D -p $NET
 
 pid=$(docker inspect -f '{{ .State.Pid }}' netserver)
 
-# before we try to make the link, make sure it does not exist
-if [[ -e /var/run/netns/$pid ]]; then
-	rm -f /var/run/netns/$pid
-fi
-ln -s /proc/$pid/ns/net /var/run/netns/$pid
 
 # before we set up the veth pair, make sure it does not exist
 if ip link show | grep -qw A1 ; then
@@ -37,16 +34,16 @@ if ip link show | grep -qw A1 ; then
 fi
 
 ip link add A1 link team0 netns $pid type macvlan mode bridge
-ip netns exec $pid ip link set dev A1 name eth0
-ip netns exec $pid ip link set eth0 up
-ip netns exec $pid ip addr add $IP3/29 dev eth0
+nsenter --target $pid --net ip link set dev A1 name eth0
+nsenter --target $pid --net ip link set eth0 up
+nsenter --target $pid --net ip addr add $IP3/29 dev eth0
 
 # if devtype is target, we get the management IP
 if [[ "$devtype" == "target" ]]; then
 	# get our management IP and gateway
-	ip netns exec $pid ip addr add $mgmt dev eth0
+	nsenter --target $pid --net ip addr add $mgmt dev eth0
 	# default route is just to the default on the switch
-	ip netns exec $pid ip route add default via $gateway dev eth0
+	nsenter --target $pid --net ip route add default via $gateway dev eth0
 	# must ping the gateway so it register our mac address
-	ip netns exec $pid ping -c 3 -W 2 $gateway >/dev/null 2>&1 || true
+	nsenter --target $pid --net ping -c 3 -W 2 $gateway >/dev/null 2>&1 || true
 fi
