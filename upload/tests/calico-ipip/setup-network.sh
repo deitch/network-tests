@@ -20,11 +20,11 @@ firewall-cmd --zone=trusted --add-source=$IPRANGE
 
 # launch calico on every host
 NO_DEFAULT_POOLS=true calicoctl node --libnetwork
+calicoctl pool add $IPRANGE --ipip
 
 
 # only create the network once, on the source
 if ! docker network ls | grep -wq calico; then
-	calicoctl pool add $IPRANGE --ipip
 	docker network create --driver calico --ipam-driver calico calico || true
 fi
 
