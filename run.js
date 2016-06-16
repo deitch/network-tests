@@ -1,7 +1,7 @@
 /*jslint node:true, esversion:6 */
 
 var fs = require('fs'), Packet = require('packet-nodejs'), async = require('async'), _ = require('lodash'), 
-scp = require('scp2'), CIDR = require('cidr-js'),
+scp = require('scp2'), CIDR = require('cidr-js'), Addr = require('netaddr').Addr,
 ssh = require('simple-ssh'), keypair = require('keypair'), forge = require('node-forge'), jsonfile = require('jsonfile'),
 argv = require('minimist')(process.argv.slice(2));
 
@@ -19,6 +19,15 @@ NETSERVERPORT = 7002,
 NETSERVERDATAPORT = 7003,
 NETSERVERLOCALPORT = 7004,
 REPETITIONS = 50000,
+SIZETOCIDR = {
+	1: 32,
+	2: 31,
+	4: 30,
+	8: 29,
+	16: 28,
+	32: 27,
+	64: 26
+},
 
 
 
@@ -127,22 +136,29 @@ mapIps = function (config,cb) {
 			// with those IPs, get blocks and assign them
 			function (res,cb) {
 				let privateIpRange = _.find(res.ip_addresses,{address_family:4,public:false}),
-				cidr = new CIDR(), fullRange = cidr.list(privateIpRange.network+'/'+privateIpRange.cidr),
+				privateIpCidr = privateIpRange.network+'/'+privateIpRange.cidr,
+				addr = Addr(privateIpCidr),
+				// how many do we need? and of what size?
+				mask = SIZETOCIDR[size],
+				cidr = new CIDR(), fullSize = cidr.list(privateIpCidr).length,
 				// what is the size we are after, and how many do we assign?
-				ipStart = fullRange.length-size*count, hostMap = {};
+				ipStart = (fullSize-size*count)/size, hostMap = {},
+				
+				// find out first subnet
+				currentCidr = addr.mask(mask);
+				// then skip to the right ipStart
+				for(let i=0; i<ipStart; i++) {
+					currentCidr = currentCidr.nextSibling();
+				}
 		
 				// if it is perhost, then we assign a different range for each host
 				// if it is not, then we assign the same range to each host
-				hostMap = _.reduce(config.hosts,function (result,host,index) {
-					let start, end;
+				hostMap = _.reduce(config.hosts,function (result,host) {
+					let myCidr = currentCidr.toString();
+					result[host] = {cidr: myCidr, range: cidr.list(myCidr)};
 					if (perhost) {
-						start = ipStart+index*size;
-						end = ipStart+index*size+size;
-					} else {
-						start = ipStart;
-						end = ipStart+count*size;
+						currentCidr = currentCidr.nextSibling();
 					}
-					result[host] = fullRange.slice(start,end);
 					return result;
 				},{});
 				cb(null,hostMap);
@@ -240,10 +256,10 @@ setupNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
 		// how do I find my peer? I find my type from devices, then all of the same type, then exclude myself
-		let errCode = false, privateIps = devices[target].ip_private_net,
+		let errCode = false, privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
 		peerName = getPeerName(target),
 		peer = devices[peerName].ip_private_mgmt,
-		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
 		cmd = `network-tests/tests/${test}/setup-network.sh ${ipsArg} --peer ${peer} --port ${NETSERVERPORT} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
 		var session = new ssh({
 			host: devices[target].ip_public.address,
@@ -289,8 +305,8 @@ setupNetwork = function (targets,test,callback) {
 teardownNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net,
-		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+		let errCode = false, privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
+		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
 		cmd = `network-tests/tests/${test}/teardown-network.sh ${ipsArg} --port ${NETSERVERPORT} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
 		var session = new ssh({
 			host: devices[target].ip_public.address,
@@ -337,8 +353,8 @@ startReflectors = function (targets,test,callback) {
 	let targetIds = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net,
-		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+		let errCode = false, privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
+		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
 		script = `network-tests/tests/${test}/start-reflector.sh ${ipsArg} --port ${NETSERVERPORT} --dataport ${NETSERVERDATAPORT}`;
 		targetIds[target] = {};
 		var session = new ssh({
@@ -388,8 +404,8 @@ getReflectorIp = function (targets,test,callback) {
 	let ips = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net,
-		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+		let errCode = false, privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
+		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
 		cmd = `network-tests/tests/${test}/get-reflector-ip.sh ${ipsArg}`;
 		log(`${target}: getting reflector IP`);
 		log(`${target}: ${cmd}`);
@@ -445,8 +461,8 @@ getHostIps = function (devs,test,callback) {
 	if (fs.existsSync(`upload/tests/${test}/get-host-ip.sh`)) {
 		// now start the reflector on each
 		async.each(devs,function (target,cb) {
-			let errCode = false, privateIps = devices[target].ip_private_net,
-		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+			let errCode = false, privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
+			ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
 			cmd = `network-tests/tests/${test}/get-host-ip.sh ${ipsArg}`;
 			log(`${target}: getting host allocated IP`);
 			log(`${target}: ${cmd}`);
@@ -515,8 +531,8 @@ initializeTests = function (tests,targets,test,callback) {
 				user: "root",
 				key: pair.private
 			}),
-			privateIps = devices[t.from].ip_private_net,
-			ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+			privateIps = devices[t.from].ip_private_net, privateIpCidr = devices[t.from].ip_private_net_cidr,
+			ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
 			cmd = `network-tests/tests/${t.test}/init-test.sh ${ipsArg} --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
 			log(`${t.from}: ${cmd}`);
 			session.exec(cmd, {
@@ -570,8 +586,8 @@ runTests = function (tests,targets,msgPrefix,callback) {
 			user: "root",
 			key: pair.private
 		}),
-		privateIps = devices[t.from].ip_private_net,
-		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+		privateIps = devices[t.from].ip_private_net, privateIpCidr = devices[t.from].ip_private_net_cidr,
+		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
 		cmd = `network-tests/tests/${t.test}/run-test.sh  ${ipsArg} --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
 		log(`${t.from}: ${cmd}`);
 		session.exec(cmd, {
@@ -678,9 +694,10 @@ runTestSuite = function (tests,test,callback) {
 			}
 		},
 		function (res,cb) {
-			// res now has an array of IPs we can use
+			// res now has a hash of IP cidr we can use for each host or for the network
 			_.forOwn(res,function (ips,host) {
-				devices[host].ip_private_net = ips;
+				devices[host].ip_private_net_cidr = ips.cidr;
+				devices[host].ip_private_net = ips.range;
 			});
 			setupNetwork(allDevs,test,cb);
 		},
