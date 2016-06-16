@@ -1025,6 +1025,16 @@ async.waterfall([
 						}
 					}
 				})
+				.exec('network-tests/scripts/04-installpciutils.sh',{
+					exit: function (code) {
+						if (code !== 0) {
+							log(item+": Failed to install pciutils");
+							session.end();
+						} else {
+							log(`${item}: pciutils installed`);
+						}
+					}
+				})
 				.exec('docker build -t netperf network-tests/image',{
 					exit: function (code) {
 						if (code !== 0) {
