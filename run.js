@@ -19,8 +19,8 @@ NETSERVERPORT = 7002,
 NETSERVERDATAPORT = 7003,
 NETSERVERLOCALPORT = 7004,
 REPETITIONS = 50000,
-// 8 for a /29
-PRIVATEIPCOUNT = 8,
+
+
 
 log = function (msg) {
 	let m = typeof(msg) === 'object' ? JSON.stringify(msg) : msg;
@@ -64,6 +64,133 @@ getPeerName = function (item) {
 	let mytype = devices[item].type, purpose = devices[item].purpose === "target" ? "source" : "target",
 	peerName = _.keys(_.pickBy(devices,{purpose:purpose, type:mytype}))[0];
 	return peerName;
+},
+
+freeProjectIps = function (cb) {
+	// remove from ip_private_net
+	_.each(_.keys(devices),function (item) {
+		devices[item].ip_private_net = [];
+	});
+	// then remove from the actual SDN
+	async.waterfall([
+		function (cb) {
+			log("getting IP ranges");
+			pkt.getProjectIpReservations(projId,{include:"assignments"},cb);
+		},
+		// ensure all IPs are assigned
+		function (res,cb) {
+			// find the available range 
+			// then figure out how many assignments we need, and how many we already have, to determine
+			// the total number required
+			let privateIpRange = _.find(res.ip_addresses,{address_family:4,public:false}),
+			assigned = _.filter(privateIpRange.assignments,{management:false});
+
+			log(`freeing up taken IPs`);
+			async.each(assigned,function (ip,callback) {
+				log(`freeing up ${ip.address}`);
+				pkt.removeIp(ip.id,function (err,data) {
+					if(err) {
+						log("error releasing "+ip.address);
+						log(err);
+						log(data);
+					} else {
+						log("released "+ip.address);
+					}
+					callback(err);
+				});
+			},cb);
+
+		}
+	],cb);
+},
+
+getTestNetworkConfig = function (test,cb) {
+	let confFile = `./upload/tests/${test}/network.json`;
+	if (fs.existsSync(confFile)) {
+		jsonfile.readFile(confFile,cb);
+	} else {
+		cb(null,null);
+	}
+},
+
+//mapIps({hosts: allDevs, perhost:false, size: res.network},cb);
+mapIps = function (config,cb) {
+	log(config);
+	if (config && config.hosts && config.size) {
+		let size = config.size, perhost = config.perhost, count = perhost ? config.hosts.length : 1;
+		async.waterfall([
+			// first get all available IPs
+			function (cb) {
+				log("getting IP ranges");
+				pkt.getProjectIpReservations(projId,{},cb);
+			},
+			// with those IPs, get blocks and assign them
+			function (res,cb) {
+				let privateIpRange = _.find(res.ip_addresses,{address_family:4,public:false}),
+				cidr = new CIDR(), fullRange = cidr.list(privateIpRange.network+'/'+privateIpRange.cidr),
+				// what is the size we are after, and how many do we assign?
+				ipStart = fullRange.length-size*count, hostMap = {};
+		
+				// if it is perhost, then we assign a different range for each host
+				// if it is not, then we assign the same range to each host
+				hostMap = _.reduce(config.hosts,function (result,host,index) {
+					let start, end;
+					if (perhost) {
+						start = ipStart+index*size;
+						end = ipStart+index*size+size;
+					} else {
+						start = ipStart;
+						end = ipStart+count*size;
+					}
+					result[host] = fullRange.slice(start,end);
+					return result;
+				},{});
+				cb(null,hostMap);
+			}
+		],cb);
+	} else {
+		log(`no custom IPs requested`);
+		cb(null);
+	}
+},
+
+assignIps = function (hostIpMap,cb) {
+		// we now have a list of servers and IPs to assign
+		log(`assigning IPs`);
+		// easier if we turn it into an array of assignment first
+		let toAssign = _.reduce(_.keys(hostIpMap),function (result,item) {
+			let myIps = hostIpMap[item];
+			log(`${item}: will assign: ${myIps.join(" ")}`);
+			for (let i=0; i<myIps.length; i++) {
+				result.push({device:item,address:myIps[i]});
+			}
+			return result;
+		},[]);
+		
+		async.each(toAssign,function (entry,callback) {
+			log(`${entry.device}: assigning ${entry.address}`);
+			//closure to handle each correctly
+			(function(item,address) {
+				devices[item].ip_private_net.push(address);
+				pkt.assignIp(devices[item].id,{address: address},function (err,data) {
+					if(err) {
+						log(item+": error assigning "+address);
+						log(err);
+						log(data);
+					} else {
+						log(item+": assigned "+address);
+					}
+					callback(err);
+				});
+			})(entry.device,entry.address);
+		},function (err) {
+			if (err) {
+				log(`error assigning IPs`);
+			} else {
+				log(`done assigning all IPs`);
+			}
+			cb(err);
+		});
 },
 
 installSoftware = function (targets,test,callback) {
@@ -113,10 +240,11 @@ setupNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
 		// how do I find my peer? I find my type from devices, then all of the same type, then exclude myself
-		let errCode = false, privateIps = devices[target].ip_private_net.join(","),
+		let errCode = false, privateIps = devices[target].ip_private_net,
 		peerName = getPeerName(target),
 		peer = devices[peerName].ip_private_mgmt,
-		cmd = `network-tests/tests/${test}/setup-network.sh --ips ${privateIps} --peer ${peer} --port ${NETSERVERPORT} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
+		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+		cmd = `network-tests/tests/${test}/setup-network.sh ${ipsArg} --peer ${peer} --port ${NETSERVERPORT} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
 		var session = new ssh({
 			host: devices[target].ip_public.address,
 			user: "root",
@@ -161,8 +289,9 @@ setupNetwork = function (targets,test,callback) {
 teardownNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net.join(","),
-		cmd = `network-tests/tests/${test}/teardown-network.sh --ips ${privateIps} --port ${NETSERVERPORT} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
+		let errCode = false, privateIps = devices[target].ip_private_net,
+		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+		cmd = `network-tests/tests/${test}/teardown-network.sh ${ipsArg} --port ${NETSERVERPORT} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
 		var session = new ssh({
 			host: devices[target].ip_public.address,
 			user: "root",
@@ -208,8 +337,9 @@ startReflectors = function (targets,test,callback) {
 	let targetIds = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net.join(","),
-		script = `network-tests/tests/${test}/start-reflector.sh --ips ${privateIps} --port ${NETSERVERPORT} --dataport ${NETSERVERDATAPORT}`;
+		let errCode = false, privateIps = devices[target].ip_private_net,
+		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+		script = `network-tests/tests/${test}/start-reflector.sh ${ipsArg} --port ${NETSERVERPORT} --dataport ${NETSERVERDATAPORT}`;
 		targetIds[target] = {};
 		var session = new ssh({
 			host: devices[target].ip_public.address,
@@ -258,8 +388,9 @@ getReflectorIp = function (targets,test,callback) {
 	let ips = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net.join(","),
-		cmd = `network-tests/tests/${test}/get-reflector-ip.sh --ips ${privateIps}`;
+		let errCode = false, privateIps = devices[target].ip_private_net,
+		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+		cmd = `network-tests/tests/${test}/get-reflector-ip.sh ${ipsArg}`;
 		log(`${target}: getting reflector IP`);
 		log(`${target}: ${cmd}`);
 		var session = new ssh({
@@ -309,6 +440,123 @@ getReflectorIp = function (targets,test,callback) {
 	});
 },
 
+getHostIps = function (devs,test,callback) {
+	let ips = {};
+	if (fs.existsSync(`upload/tests/${test}/get-host-ip.sh`)) {
+		// now start the reflector on each
+		async.each(devs,function (target,cb) {
+			let errCode = false, privateIps = devices[target].ip_private_net,
+		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+			cmd = `network-tests/tests/${test}/get-host-ip.sh ${ipsArg}`;
+			log(`${target}: getting host allocated IP`);
+			log(`${target}: ${cmd}`);
+			var session = new ssh({
+				host: devices[target].ip_public.address,
+				user: "root",
+				key: pair.private
+			});
+			// get the reflector IP
+
+			session.exec(cmd,{
+				exit: function (code,stdout,stderr) {
+					log(stdout);
+					if (code !== 0) {
+						errCode = true;
+						log(`code: ${code}`);
+						log(stdout);
+						log(stderr);
+						session.end();
+						cb(target+": Failed to get host allocated IP");
+					} else {
+						// the stdout response should be a space separated list of IPs. The first is for local, the second is for remote
+						ips[target] = stdout.replace(/\s+/g," ").replace(/(^\s+|\s+$)/,'').split(/\s/);
+						log(`${target}: retrieved allocated IPs ${ips[target].join(",")}`);
+					}
+				}
+			});
+			session.on('error',function (err) {
+				log(target+": ssh error connecting to start netserver");
+				log(err);
+				session.end();
+				cb(target+": ssh connection failed");
+			});
+			session.on('close',function (hadError) {
+				if (!hadError && !errCode) {
+					log("get-host-ip session closed");
+					cb(null);
+				}
+			});
+			session.start();
+
+		},function (err) {
+			if(err) {
+				callback(err);
+			} else {
+				callback(null,ips);
+			}
+		});
+	} else {
+		callback(null,ips);
+	}
+},
+
+
+initializeTests = function (tests,targets,test,callback) {
+	// this must be run in series so they don't impact each other
+	if (fs.existsSync(`upload/tests/${test}/init-test.sh`)) {
+		async.mapSeries(tests,function (t,cb) {
+			let msg = test+" init test: "+t.type+" "+t.protocol+" "+t.size, output,
+			target = targets[t.to].ip[t.type],
+			errCode = false;
+			log(t.from+": initializing "+msg);
+			// get the private IP for the device
+			let session = new ssh({
+				host: devices[t.from].ip_public.address,
+				user: "root",
+				key: pair.private
+			}),
+			privateIps = devices[t.from].ip_private_net,
+			ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+			cmd = `network-tests/tests/${t.test}/init-test.sh ${ipsArg} --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
+			log(`${t.from}: ${cmd}`);
+			session.exec(cmd, {
+				exit: function (code,stdout,stderr) {
+					if (code !== 0) {
+						log(`code: ${code}`);
+						log(stdout);
+						log(stderr);
+						errCode = true;
+						session.end();
+						cb(t.from+": init-test failed");
+					} else {
+						output = stdout;
+					}
+				}
+			})
+			;
+			session.on('error',function (err) {
+				log(t.from+": ssh error connecting for "+msg);
+				log(err);
+				session.end();
+				cb(t.from+": ssh connection failed");
+			});
+			session.on('close',function (hadError) {
+				if (!hadError && !errCode) {
+					log(t.from+": init test complete: "+msg);
+					cb(null);
+				}
+			});
+			session.start();
+		},function (err) {
+			callback(err);
+		});
+	} else {
+		callback(null);
+	}
+},
+
+
+
 runTests = function (tests,targets,msgPrefix,callback) {
 	// this must be run in series so they don't impact each other
 	async.mapSeries(tests,function (t,cb) {
@@ -322,8 +570,9 @@ runTests = function (tests,targets,msgPrefix,callback) {
 			user: "root",
 			key: pair.private
 		}),
-		privateIps = devices[t.from].ip_private_net.join(","),
-		cmd = `network-tests/tests/${t.test}/run-test.sh  --ips ${privateIps} --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
+		privateIps = devices[t.from].ip_private_net,
+		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")}`,
+		cmd = `network-tests/tests/${t.test}/run-test.sh  ${ipsArg} --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
 		log(`${t.from}: ${cmd}`);
 		session.exec(cmd, {
 			exit: function (code,stdout,stderr) {
@@ -356,6 +605,9 @@ runTests = function (tests,targets,msgPrefix,callback) {
 		session.start();
 	},callback);
 },
+
+
+
 
 stopReflectors = function (targets,test,callback) {
 	// stop the netserver reflectors
@@ -405,10 +657,31 @@ runTestSuite = function (tests,test,callback) {
 	// 5- remove networks
 	
 	async.waterfall([
+		freeProjectIps,
 		function (cb) {
 			installSoftware(allDevs,test,cb);
 		},
+		// get the network.conf
 		function (cb) {
+			getTestNetworkConfig(test,cb);
+		},
+		// map the IPs to the hosts
+		function (res,cb) {
+			if (!res) {
+				cb(null,null);
+			} else if (res.network !== undefined) {
+				mapIps({hosts: allDevs, perhost:false, size: res.network},cb);
+			} else if (res.host !== undefined) {
+				mapIps({hosts: allDevs, perhost: true, size: res.host},cb);
+			} else {
+				cb(null,null);
+			}
+		},
+		function (res,cb) {
+			// res now has an array of IPs we can use
+			_.forOwn(res,function (ips,host) {
+				devices[host].ip_private_net = ips;
+			});
 			setupNetwork(allDevs,test,cb);
 		},
 		function (cb) {
@@ -423,6 +696,15 @@ runTestSuite = function (tests,test,callback) {
 			_.forEach(res,function (value,key) {
 				targetIds[key].ip = value;
 			});
+			initializeTests(tests,targetIds,test,cb);
+		},
+		function (cb) {
+			getHostIps(allDevs,test,cb);
+		},
+		function (res,cb) {
+			assignIps(res,cb);
+		},
+		function (cb) {
 			runTests(tests,targetIds,test,cb);
 		},
 		function (res,cb) {
@@ -649,90 +931,8 @@ async.waterfall([
 			}
 		);
 	},
-	// get all of our available IP ranges
-	function (cb) {
-		log("getting IP ranges");
-		pkt.getProjectIpReservations(projId,{include:"assignments"},cb);
-	},
-	// ensure all IPs are assigned
-	function (res,cb) {
-		// find the available range 
-		// then figure out how many assignments we need, and how many we already have, to determine
-		// the total number required
-		let privateIpRange = _.find(res.ip_addresses,{address_family:4,public:false}),
-		cidr = new CIDR(), fullRange = cidr.list(privateIpRange.network+'/'+privateIpRange.cidr),
-		assigned = privateIpRange.assignments,
-		// we want a /30 of 8 addresses for each host, so they can talk internally without a problem, but also speak to the other
-		ipStart = PRIVATEIPCOUNT*2,
-		
-		// usableIps contains the IPs we want
-		usableIps = fullRange.slice(ipStart,ipStart+PRIVATEIPCOUNT*_.keys(activeDevs).length),
-		// takenIps contains the subset of usableIps that are taken
-		takenIps = _.reduce(assigned,function (result,assign) {
-			if (_.indexOf(usableIps,assign.network) > -1) {
-				result.push(assign);
-			}
-			return result;
-		},[]),
-		
-		// next, we need to make a list of servers and assign IPs
-		toAssign = _.reduce(_.keys(activeDevs),function (result,item,index) {
-			let myIps = usableIps.slice(PRIVATEIPCOUNT*index,PRIVATEIPCOUNT*(index+1));
-			log(`${item}: will assign: ${myIps.join(" ")}`);
-			for (let i=0; i<myIps.length; i++) {
-				result.push({device:item,address:myIps[i]});
-			}
-			return result;
-		},[]);
-
-
-		// 1- free up any takenIps
-		// 2- assign the new IPs		
-
-		// we now have a list of servers and IPs to assign
-		async.series([
-			function (cb) {
-				log(`freeing up taken IPs`);
-				async.each(takenIps,function (ip,callback) {
-					log(`freeing up ${ip.address}`);
-					pkt.removeIp(ip.id,function (err,data) {
-						if(err) {
-							log("error releasing "+ip.address);
-							log(err);
-							log(data);
-						} else {
-							log("released "+ip.address);
-						}
-						callback(err);
-					});
-				},cb);
-			},
-			function (cb) {
-				log(`assigning IPs`);
-				async.each(toAssign,function (entry,callback) {
-					log(entry.device+": assigning "+entry.address);
-					//closure to handle each correctly
-					(function(item,address) {
-						devices[item].ip_private_net.push(address);
-						pkt.assignIp(devices[item].id,{address: address},function (err,data) {
-							if(err) {
-								log(item+": error assigning "+address);
-								log(err);
-								log(data);
-							} else {
-								log(item+": assigned "+address);
-							}
-							callback(err);
-						});
-					})(entry.device,entry.address);
-				},function (err) {
-					cb(err);
-				});
-			}
-		],cb);
-	},
 	// upload the scripts
-	function (res,cb) {
+	function (cb) {
 		log("uploading scripts");
 		async.each(_.keys(activeDevs), function (item,cb) {
 			// get the IP for the device
