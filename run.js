@@ -233,6 +233,7 @@ installSoftware = function (targets,test,callback) {
 		session.on('error',function (err) {
 			log(target+": ssh error connecting to install test software");
 			log(err);
+			errCode = true;
 			session.end();
 			cb(target+": ssh connection failed");
 		});
@@ -1055,6 +1056,69 @@ async.waterfall([
 			cb(err);
 		});		
 	},
+	
+	// set any necessary kernel parameters and other changes that require reboot
+	function (cb) {
+		log("setting kernel parameters");
+		let reboot = false, rebootWait = 60;
+		async.each(_.keys(activeDevs), function (item,cb) {
+			// get the private IP for the device
+			let ipaddr = devices[item].ip_public.address;
+			log(`${item}: setting kernel parameters`);
+			var session = new ssh({
+				host: ipaddr,
+				user: "root",
+				key: pair.private
+			});
+			session
+				.exec(`network-tests/scripts/99-assignbusses.sh`,{
+					exit: function (code,stdout,stderr) {
+						if (code !== 0) {
+							log(item+": Failed to set kernel parameters");
+							log(stdout);
+							log(stderr);
+							session.end();
+						} else {
+							log(`${item}: kernel parameters set`);
+							if (stdout.indexOf("REBOOT") > -1) {
+								reboot = true;
+							}
+						}
+					}
+				})
+				;
+				session.on('error',function (err) {
+					log(item+": error setting kernel parameters");
+					log(err);
+					session.end();
+					cb(item+": ssh connection failed");
+				})
+				.on('close',function (hadError) {
+					if (!hadError) {
+						log(`${item}: kernel set complete`);
+						cb(null);
+					}
+				});
+				session.start();
+		}, function (err) {
+			if (err) {
+				log("failed to set kernel parameters");
+				cb(err);
+			} else {
+				log("kernel parameters set for all servers");
+				if (reboot) {
+					log(`reboot was required, waiting ${rebootWait} seconds`);
+					setTimeout(function () {
+						cb();
+					},rebootWait*1000);
+				} else {
+					cb();
+				}
+			}
+		});	
+	},
+
+	
 	// run all of our tests
 	
 	// first run our benchmark bare metal tests
