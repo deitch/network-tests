@@ -19,12 +19,17 @@ devtype=${hostname%%[0-9]*}
 firewall-cmd --zone=trusted --add-source=$IPRANGE
 
 # launch calico on every host
-calicoctl node --libnetwork
+NO_DEFAULT_POOLS=true calicoctl node --libnetwork
+
 
 # only create the network once, on the source
-if [[ "$devtype" == "source" ]]; then
+if ! docker network ls | grep -wq calico; then
 	calicoctl pool add $IPRANGE --ipip
-	docker network create --driver calico --ipam-driver calico calico
+	docker network create --driver calico --ipam-driver calico calico || true
 fi
 
-
+# at this juncture, we should have a calico network, or fail
+if ! docker network ls | grep -wq calico; then
+	echo "docker network calico does not exist"
+	exit 1
+fi
