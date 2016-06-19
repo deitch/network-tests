@@ -1152,7 +1152,7 @@ async.waterfall([
 
 		// now run container tests - be sure to exclude metal
 		// THESE MUST BE SERIES, OR THEY WILL TROUNCE EACH OTHER!!
-		async.eachSeries(_.without(activeTests,'metal'),function (test,cb) {
+		async.eachSeries(_.without(activeTests,'metal','sriov'),function (test,cb) {
 			log("running container:"+test+" tests");
 			// make the list of what we will test
 			let tests = genTestList({protocols:activeProtocols,sizes:activeSizes,networks:activeNetworks,devices:activeDevs, test:test, port:NETSERVERPORT, reps: REPETITIONS});
@@ -1170,9 +1170,24 @@ async.waterfall([
 			cb(err);
 		});
 	},
-
-	// destroy all hosts
+	// last run our SR-IOV tests
 	function (cb) {
+		if (_.indexOf(activeTests,"sriov") > -1) {
+			log("running sriov tests");
+			// make the list of what we will test
+			let tests = genTestList({protocols:activeProtocols,sizes:activeSizes,networks:activeNetworks,devices:activeDevs, test:"sriov", port:NETSERVERPORT, reps: REPETITIONS});
+			runTestSuite(tests,'sriov',cb);
+		} else {
+			log("skipping sriov tests");
+			cb(null,null);
+		}
+	},
+	// destroy all hosts
+	function (results,cb) {
+		// save the results
+		log("sriov tests complete");
+		totalResults.push.apply(totalResults,results||[]);
+	
 		if (keepItems) {
 			log("command-line flag not to destroy servers");
 			cb(null,false);
