@@ -19,8 +19,6 @@ hostname=$(hostname)
 devtype=${hostname%%[0-9]*}
 
 
-mkdir -p /var/run/netns
-
 
 PORTLINE="-p $NETSERVERPORT:$NETSERVERPORT -p $NETSERVERDATAPORT:$NETSERVERDATAPORT -p $NETSERVERDATAPORT:$NETSERVERDATAPORT/udp"
 docker run $PORTLINE --net=none -d --name=netserver netperf netserver -D -p $NETSERVERPORT
