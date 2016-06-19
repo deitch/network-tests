@@ -11,7 +11,7 @@ IP3=${PRIVATEIPS[2]}
 IP4=${PRIVATEIPS[3]}
 
 
-docker run -t -d --net=none --name=netperf netperf sh
+cid=$(docker run -t -d --net=none --name=netperf netperf sh)
 
 pid=$(docker inspect -f '{{ .State.Pid }}' netperf)
 dev=$(awk '{print $1}' /tmp/iov_nic )

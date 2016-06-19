@@ -17,7 +17,7 @@ devtype=${hostname%%[0-9]*}
 
 
 
-docker run -t -d --net=none --name=netperf netperf sh
+cid=$(docker run -t -d --net=none --name=netperf netperf sh)
 
 pid=$(docker inspect -f '{{ .State.Pid }}' netperf)
 
