@@ -121,6 +121,15 @@ while [[ $# > 0 ]]; do
                 exit 1
             fi
             ;;
+        --units)       # Takes an option argument, ensuring it has been specified.
+            if [ -n "$2" ]; then
+                TESTUNITS=$2
+                shift
+            else
+                printf 'ERROR: "--units" requires a non-empty option argument.\n' >&2
+                exit 1
+            fi
+            ;;
 
         *)               # Default case: If no more options then break out of the loop.
             ;;

@@ -19,6 +19,7 @@ NETSERVERPORT = 7002,
 NETSERVERDATAPORT = 7003,
 NETSERVERLOCALPORT = 7004,
 REPETITIONS = 50000,
+TESTUNITS="LOCAL_CPU_UTIL,RT_LATENCY,MEAN_LATENCY,MIN_LATENCY,MAX_LATENCY,P50_LATENCY,P90_LATENCY,P99_LATENCY",
 SIZETOCIDR = {
 	1: 32,
 	2: 31,
@@ -589,7 +590,7 @@ runTests = function (tests,targets,msgPrefix,callback) {
 		}),
 		privateIps = devices[t.from].ip_private_net, privateIpCidr = devices[t.from].ip_private_net_cidr,
 		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
-		cmd = `network-tests/tests/${t.test}/run-test.sh  ${ipsArg} --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
+		cmd = `network-tests/tests/${t.test}/run-test.sh  ${ipsArg} --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT} --units ${TESTUNITS}`;
 		log(`${t.from}: ${cmd}`);
 		session.exec(cmd, {
 			exit: function (code,stdout,stderr) {
