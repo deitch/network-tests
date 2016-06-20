@@ -2,9 +2,6 @@
 
 set -e
 
-COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
-. $COMMON/getoption
-
 npname=netperf-$(hostname)
 
 docker exec -i $npname $1

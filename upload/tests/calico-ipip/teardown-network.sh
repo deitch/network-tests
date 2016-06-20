@@ -2,9 +2,6 @@
 
 set -e
 
-COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
-. $COMMON/getoption
-
 # only remove the network once, on the source, if it exists
 
 if docker network ls | grep -wq calico; then

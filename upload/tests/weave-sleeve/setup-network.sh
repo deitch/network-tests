@@ -7,9 +7,6 @@ set -e
 # because of port mapping, it will work just fine
 
 
-COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
-. $COMMON/getoption
-
 IPRANGE=192.168.0.0/16
 
 # add our range to the trusted zone

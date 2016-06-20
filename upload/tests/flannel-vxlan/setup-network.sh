@@ -7,9 +7,6 @@ set -e
 # because of port mapping, it will work just fine
 
 
-COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
-. $COMMON/getoption
-
 IPRANGE=192.168.0.0/16
 
 # open the firewall ports necessary
@@ -24,11 +21,7 @@ done
 
 
 # launch flannel on every host
-nic=team0
-# get our management IP
-mgmt=$(ip addr show $nic | awk '/10\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+/ {print $2}')
-mgmt=${mgmt%%/*}
-(flanneld --public-ip $mgmt --iface $mgmt &)
+(flanneld --public-ip $PRIVATEMGMTIP --iface $PRIVATEMGMTIP &)
 
 # restart the docker engine with the right bip
 systemctl stop docker

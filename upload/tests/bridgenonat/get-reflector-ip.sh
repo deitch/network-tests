@@ -7,11 +7,9 @@ set -e
 # IP3 is used for netserver
 # IP4 is used for netperf
 
-COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
-. $COMMON/getoption
+IFS=',' read -ra PRIVATEIPSA <<< "$PRIVATEIPS"
 
-
-localIP=${PRIVATEIPS[2]}
-remoteIP=${PRIVATEIPS[2]}
+localIP=${PRIVATEIPSA[2]}
+remoteIP=${PRIVATEIPSA[2]}
 
 echo $localIP $remoteIP

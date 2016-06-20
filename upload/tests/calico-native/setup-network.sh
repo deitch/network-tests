@@ -7,12 +7,6 @@ set -e
 # because of port mapping, it will work just fine
 
 
-COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
-. $COMMON/getoption
-
-hostname=$(hostname)
-devtype=${hostname%%[0-9]*}
-
 # launch calico on every host
 NO_DEFAULT_POOLS=true calicoctl node --libnetwork
 calicoctl pool add $PRIVATEIPCIDR

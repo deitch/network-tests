@@ -2,13 +2,12 @@
 
 set -e
 
-COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
-. $COMMON/getoption
+IFS=',' read -ra PRIVATEIPSA <<< "$PRIVATEIPS"
 
-IP1=${PRIVATEIPS[0]}
-IP2=${PRIVATEIPS[1]}
-IP3=${PRIVATEIPS[2]}
-IP4=${PRIVATEIPS[3]}
+IP1=${PRIVATEIPSA[0]}
+IP2=${PRIVATEIPSA[1]}
+IP3=${PRIVATEIPSA[2]}
+IP4=${PRIVATEIPSA[3]}
 
 # IP1 is used for the network
 # IP2 is unused
@@ -16,8 +15,6 @@ IP4=${PRIVATEIPS[3]}
 # IP4 is used for netperf
 
 localIP=$IP3
-remoteIP=$(awk '{print $1}' /tmp/private_management_ip)
-# remoteIP needs to be without cidr
-remoteIP=${remoteIP%%/*}
+remoteIP=$PRIVATEMGMTIP
 
 echo $localIP $remoteIP

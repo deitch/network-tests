@@ -2,13 +2,12 @@
 
 set -e
 
-COMMON=$(dirname "${BASH_SOURCE[0]}")/../../common
-. $COMMON/getoption
+IFS=',' read -ra PRIVATEIPSA <<< "$PRIVATEIPS"
 
-IP1=${PRIVATEIPS[0]}
-IP2=${PRIVATEIPS[1]}
-IP3=${PRIVATEIPS[2]}
-IP4=${PRIVATEIPS[3]}
+IP1=${PRIVATEIPSA[0]}
+IP2=${PRIVATEIPSA[1]}
+IP3=${PRIVATEIPSA[2]}
+IP4=${PRIVATEIPSA[3]}
 
 
 cid=$(docker run -t -d --net=none --name=netperf netperf sh)

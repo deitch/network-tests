@@ -210,18 +210,26 @@ assignIps = function (hostIpMap,cb) {
 		});
 },
 
+makeShellEnv = function (hashEnv) {
+	return _.reduce(hashEnv,function (result,value,key) {
+		result.push(`${key}="${value}"`);
+		return result;
+	},[]).join(" ");
+},
+
 runCmd = function (host,cmds,callback) {
-	let errCode = false, output = null;
-	var session = new ssh({
-		host: devices[host].ip_public.address,
+	let errCode = false, output = null,
+	session = new ssh({
+		host: devices[host].ip_public,
 		user: "root",
 		key: pair.private
-	});
+	}),
+	env = makeShellEnv(devices[host].env);
 	// add each cmd up
 	_.each(cmds,function (cmdset) {
 		let cmd = cmdset.cmd, msg = cmdset.msg;
 		log(`${host}: ${cmd}`);
-		session.exec(cmd,{
+		session.exec(`${env} ${cmd}`,{
 			exit: function (code,stdout,stderr) {
 				if (code !== 0) {
 					log(`code: ${code}`);
@@ -266,15 +274,37 @@ installSoftware = function (targets,test,callback) {
 	});
 },
 
+getHostEnv = function (targets,callback) {
+	// now start the reflector on each
+	async.map(targets,function (target,cb) {
+		let cmd = `network-tests/common/get-host-env.sh`;
+		runCmd(target,[{cmd:cmd,msg:"get host environment"}],cb);
+	},function (err,data) {
+		let envMap;
+		if(!err) {
+			// fill in results
+			// data is an array of results, one for each target
+			envMap = _.reduce(targets,function (result,item,index) {
+				// convert KEY=value into js object
+				result[item] = _.reduce(data[index].split(/\n/,function (res,item) {
+					let parts = item.split('=',2);
+					if (parts.length === 2) {
+						res[parts[0]] = parts[1];
+					}
+					return res;
+				},{}));
+				return result;
+			},{});
+		}
+		callback(err,envMap);
+	});
+},
+
 setupNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
 		// how do I find my peer? I find my type from devices, then all of the same type, then exclude myself
-		let privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
-		peerName = getPeerName(target),
-		peer = devices[peerName].ip_private_mgmt,
-		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
-		cmd = `network-tests/tests/${test}/setup-network.sh ${ipsArg} --peer ${peer} --port ${NETSERVERPORT} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
+		let cmd = `network-tests/tests/${test}/setup-network.sh`;
 		runCmd(target,[{cmd:cmd,msg:"setup network"}],cb);
 	},function (err) {
 		if(err) {
@@ -288,9 +318,7 @@ setupNetwork = function (targets,test,callback) {
 teardownNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
-		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
-		cmd = `network-tests/tests/${test}/teardown-network.sh ${ipsArg} --port ${NETSERVERPORT} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
+		let cmd = `network-tests/tests/${test}/teardown-network.sh`;
 		runCmd(target,[{cmd:cmd,msg:"tear down network"}],cb);
 	},function (err) {
 		if(err) {
@@ -305,10 +333,9 @@ startReflectors = function (targets,test,callback) {
 	let targetIds = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
-		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
-		cmd = `network-tests/tests/${test}/start-reflector.sh ${ipsArg} --port ${NETSERVERPORT} --dataport ${NETSERVERDATAPORT}`;
+		let cmd = `network-tests/tests/${test}/start-reflector.sh`;
 		targetIds[target] = {};
+
 		// start the netserver
 		runCmd(target,[{cmd:cmd,msg:"start netserver"}],cb);
 	},function (err) {
@@ -324,9 +351,8 @@ getReflectorIp = function (targets,test,callback) {
 	let ips = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
-		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
-		cmd = `network-tests/tests/${test}/get-reflector-ip.sh ${ipsArg}`;
+		let cmd = `network-tests/tests/${test}/get-reflector-ip.sh`;
+
 		log(`${target}: getting reflector IP`);
 		log(`${target}: ${cmd}`);
 		runCmd(target,[{cmd:cmd,msg:"get netserver IP"}],function (err,data) {
@@ -351,9 +377,7 @@ getHostIps = function (devs,test,callback) {
 	if (fs.existsSync(`upload/tests/${test}/get-host-ip.sh`)) {
 		// now start the reflector on each
 		async.each(devs,function (target,cb) {
-			let privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
-			ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
-			cmd = `network-tests/tests/${test}/get-host-ip.sh ${ipsArg}`;
+			let cmd = `network-tests/tests/${test}/get-host-ip.sh`;
 			log(`${target}: getting host allocated IP`);
 			log(`${target}: ${cmd}`);
 
@@ -382,12 +406,9 @@ initializeTests = function (tests,targets,test,callback) {
 	// this must be run in series so they don't impact each other
 	if (fs.existsSync(`upload/tests/${test}/init-test.sh`)) {
 		async.mapSeries(tests,function (t,cb) {
-			let msg = test+" init test: "+t.type+" "+t.protocol+" "+t.size,
-			target = targets[t.to].ip[t.type];
+			let msg = test+" init test: "+t.type+" "+t.protocol+" "+t.size;
 			// get the private IP for the device
-			let privateIps = devices[t.from].ip_private_net, privateIpCidr = devices[t.from].ip_private_net_cidr,
-			ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
-			cmd = `network-tests/tests/${t.test}/init-test.sh ${ipsArg} --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
+			let cmd = `network-tests/tests/${t.test}/init-test.sh`;
 
 			log(t.from+": initializing "+msg);
 			runCmd(t.from,[{cmd:cmd,msg:"init-test"}],cb);
@@ -409,9 +430,7 @@ runTests = function (tests,targets,msgPrefix,callback) {
 		target = targets[t.to].ip[t.type];
 		log(t.from+": running "+msg);
 		// get the private IP for the device
-		let privateIps = devices[t.from].ip_private_net, privateIpCidr = devices[t.from].ip_private_net_cidr,
-		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
-		cmd = `network-tests/tests/${t.test}/run-test.sh ${ipsArg} netperf -P 0 -H ${target} -c -t ${t.protocol}_RR -l -${t.reps} -v 2 -p ${t.port} -- -k ${TESTUNITS} -r ${t.size},${t.size} -P ${NETSERVERLOCALPORT},${NETSERVERDATAPORT}`;
+		let cmd = `network-tests/tests/${t.test}/run-test.sh netperf -P 0 -H ${target} -c -t ${t.protocol}_RR -l -${t.reps} -v 2 -p ${t.port} -- -k ${TESTUNITS} -r ${t.size},${t.size} -P ${NETSERVERLOCALPORT},${NETSERVERDATAPORT}`;
 		runCmd(target,[{cmd:cmd,msg:"run-test"}],function (err,data) {
 			cb(err,_.extend({},t,{results:data}));
 		});
@@ -434,6 +453,11 @@ runTestSuite = function (tests,test,callback) {
 	
 	// find all of the targets
 	let targets = _.uniq(_.map(tests,"to")), allDevs = _.keys(activeDevs), targetIds = {}, allResults;
+	
+	// clear target env
+	_.each(allDevs,function (host) {
+		devices[host].env = {};
+	});
 	
 	// 1- create networks, if needed
 	// 2- start reflectors
@@ -467,6 +491,29 @@ runTestSuite = function (tests,test,callback) {
 			_.forOwn(res,function (ips,host) {
 				devices[host].ip_private_net_cidr = ips.cidr;
 				devices[host].ip_private_net = ips.range;
+			});
+			getHostEnv(allDevs,cb);
+		},
+		function (res,cb) {
+			_.forOwn(res,function (hostEnv,host) {
+				let privateIps = devices[host].ip_private_net, privateIpCidr = devices[host].ip_private_net_cidr,
+				peerName = getPeerName(host),
+				peer = devices[peerName].ip_private_mgmt,
+				ipsArg = privateIps.length === 0 ? {} : {PRIVATEIPS: privateIps.join(","), PRIVATEIPCIDR: privateIpCidr},
+				env = _.extend({
+					PEER: peer,
+					PEERNAME: peerName,
+					NETSERVERPORT: NETSERVERPORT,
+					LOCALPORT: NETSERVERLOCALPORT,
+					NETSERVERDATAPORT: NETSERVERDATAPORT,
+					DEVTYPE: devices[host].purpose,
+					HOSTNAME: host,
+					PRIVATEMGMTIP: devices[host].ip_private_mgmt,
+					PRIVATEMGMTIPCIDR: devices[host].ip_private_mgmt+'/31',
+					PUBLICIP: devices[host].ip_public,
+					PUBLICIPCIDR: devices[host].ip_public+'/31'
+				},ipsArg,hostEnv);
+				devices[host].env = env;
 			});
 			setupNetwork(allDevs,test,cb);
 		},
@@ -688,7 +735,7 @@ async.waterfall([
 								// save my ID
 								devices[name].id = item.id;
 								// save my private IP
-								devices[name].ip_public = _.find(item.ip_addresses, {public:true,address_family:4,management:true});
+								devices[name].ip_public = _.find(item.ip_addresses, {public:true,address_family:4,management:true}).address;
 								devices[name].ip_private_mgmt = _.find(item.ip_addresses, {public:false,address_family:4,management:true}).address;
 								devices[name].ip_private_net = [];
 								// push those onto the private list
@@ -722,7 +769,7 @@ async.waterfall([
 		log("uploading scripts");
 		async.each(_.keys(activeDevs), function (item,cb) {
 			// get the IP for the device
-			let ipaddr = devices[item].ip_public.address;
+			let ipaddr = devices[item].ip_public;
 			log(item+": uploading scripts to "+ipaddr);
 			scp.scp('upload',{
 				host: ipaddr,
@@ -751,7 +798,7 @@ async.waterfall([
 		log("installing software");
 		async.each(_.keys(activeDevs), function (item,cb) {
 			// get the private IP for the device
-			let ipaddr = devices[item].ip_public.address,
+			let ipaddr = devices[item].ip_public,
 			peerName = getPeerName(item),
 			peer = devices[peerName].ip_private_mgmt;
 			log(item+": installing software on "+ipaddr);
@@ -778,7 +825,7 @@ async.waterfall([
 		let reboot = false, rebootWait = 60;
 		async.each(_.keys(activeDevs), function (item,cb) {
 			// get the private IP for the device
-			let ipaddr = devices[item].ip_public.address;
+			let ipaddr = devices[item].ip_public;
 			log(`${item}: setting kernel parameters`);
 			runCmd(ipaddr,[{cmd:`network-tests/scripts/99-assignbusses.sh`,msg:"set kernel parameters"}],function (err,data) {
 				if (data.indexOf("REBOOT") > -1) {
