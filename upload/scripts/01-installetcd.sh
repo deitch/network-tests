@@ -2,9 +2,6 @@
 
 set -e
 
-COMMON=$(dirname "${BASH_SOURCE[0]}")/../common
-. $COMMON/getoption
-
 # do we already have etcd?
 if command -v "docker" > /dev/null 2>&1; then
 	yum update etcd
