@@ -799,11 +799,12 @@ async.waterfall([
 		async.each(_.keys(activeDevs), function (item,cb) {
 			// get the private IP for the device
 			let ipaddr = devices[item].ip_public,
+			mgmt = devices[item].ip_private_mgmt,
 			peerName = getPeerName(item),
 			peer = devices[peerName].ip_private_mgmt;
 			log(item+": installing software on "+ipaddr);
 			runCmd(ipaddr,[
-				{cmd: `network-tests/scripts/01-installetcd.sh --peer ${peer} --peername ${peerName}`, msg:"install etcd"},
+				{cmd: `network-tests/scripts/01-installetcd.sh ${mgmt} ${peer} ${peerName}`, msg:"install etcd"},
 				{cmd: `network-tests/scripts/02-installdocker.sh`, msg:"install docker"},
 				{cmd: `network-tests/scripts/03-installnetperf.sh`, msg:"install netperf"},
 				{cmd: `network-tests/scripts/04-installpciutils.sh`, msg:"install pciutils"},

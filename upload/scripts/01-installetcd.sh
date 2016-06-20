@@ -13,11 +13,13 @@ else
 fi
 
 
-nic=team0
+TEAMNIC=$(ip route | awk '/default/ {print $5}')
 # get our management IP
 HOSTNAME=$(hostname)
-mgmt=$(ip addr show $nic | awk '/10\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+/ {print $2}')
-mgmt=${mgmt%%/*}
+PRIVATEMGMTIP=$1
+PEER=$2
+PEERNAME=$3
+
 # clean up anything old
 DATA_DIR=/var/lib/etcd/default.etcd
 CONF_FILE=/etc/etcd/etcd.conf
