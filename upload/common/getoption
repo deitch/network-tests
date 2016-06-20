@@ -1,4 +1,5 @@
 # parse all of the options
+REMAINING=
 
 while [[ $# > 0 ]]; do
     case $1 in
@@ -132,6 +133,7 @@ while [[ $# > 0 ]]; do
             ;;
 
         *)               # Default case: If no more options then break out of the loop.
+            REMAINING="$REMAINING $1"
             ;;
     esac
 
@@ -141,3 +143,6 @@ done
 # if we have PRIVATEIPS, split them up
 IFS=',' read -ra PRIVATEIPS <<< "$TMPPRIVATEIPS"
 
+if [[ -n "$REMAINING" ]]; then
+	eval set $REMAINING
+fi

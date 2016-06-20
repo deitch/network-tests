@@ -210,41 +210,53 @@ assignIps = function (hostIpMap,cb) {
 		});
 },
 
-installSoftware = function (targets,test,callback) {
-	// now start the reflector on each
-	async.each(targets,function (target,cb) {
-		let errCode = false,
-		cmd = `network-tests/tests/${test}/install-software.sh`;
-		var session = new ssh({
-			host: devices[target].ip_public.address,
-			user: "root",
-			key: pair.private
-		});
-		// start the netserver container
-		log(`${target}: ${cmd}`);
+runCmd = function (host,cmds,callback) {
+	let errCode = false, output = null;
+	var session = new ssh({
+		host: devices[host].ip_public.address,
+		user: "root",
+		key: pair.private
+	});
+	// add each cmd up
+	_.each(cmds,function (cmdset) {
+		let cmd = cmdset.cmd, msg = cmdset.msg;
+		log(`${host}: ${cmd}`);
 		session.exec(cmd,{
-			exit: function (code) {
+			exit: function (code,stdout,stderr) {
 				if (code !== 0) {
+					log(`code: ${code}`);
+					log(stderr);
+					log(stdout);
 					errCode = true;
 					session.end();
-					cb(target+": Failed to install test software");
+					callback(host+": Failed to "+msg);
+				} else {
+					output = stdout;
 				}
 			}
 		});
-		session.on('error',function (err) {
-			log(target+": ssh error connecting to install test software");
-			log(err);
-			errCode = true;
-			session.end();
-			cb(target+": ssh connection failed");
-		});
-		session.on('close',function (hadError) {
-			if (!hadError && !errCode) {
-				log(`${target}: test software installed successfully`);
-				cb(null);
-			}
-		});
-		session.start();
+	});
+	session.on('error',function (err) {
+		log(host+": ssh error connecting");
+		log(err);
+		errCode = true;
+		session.end();
+		callback(host+": ssh connection failed");
+	});
+	session.on('close',function (hadError) {
+		if (!hadError && !errCode) {
+			log(`${host}: success`);
+			callback(null,output);
+		}
+	});
+	session.start();
+},
+
+installSoftware = function (targets,test,callback) {
+	// now start the reflector on each
+	async.each(targets,function (target,cb) {
+		let cmd = `network-tests/tests/${test}/install-software.sh`;
+		runCmd(target,[{cmd:cmd,msg:"install test software"}],cb);
 	},function (err) {
 		if(err) {
 			callback(err);
@@ -258,43 +270,12 @@ setupNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
 		// how do I find my peer? I find my type from devices, then all of the same type, then exclude myself
-		let errCode = false, privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
+		let privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
 		peerName = getPeerName(target),
 		peer = devices[peerName].ip_private_mgmt,
 		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
 		cmd = `network-tests/tests/${test}/setup-network.sh ${ipsArg} --peer ${peer} --port ${NETSERVERPORT} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
-		var session = new ssh({
-			host: devices[target].ip_public.address,
-			user: "root",
-			key: pair.private
-		});
-		// start the netserver container
-		log(`${target}: ${cmd}`);
-		session.exec(cmd,{
-			exit: function (code,stdout,stderr) {
-				if (code !== 0) {
-					log(`code: ${code}`);
-					log(stdout);
-					log(stderr);
-					errCode = true;
-					session.end();
-					cb(target+": Failed to setup network");
-				}
-			}
-		});
-		session.on('error',function (err) {
-			log(target+": ssh error connecting to start netserver");
-			log(err);
-			session.end();
-			cb(target+": ssh connection failed");
-		});
-		session.on('close',function (hadError) {
-			if (!hadError && !errCode) {
-				log(`${target}: network set up successfully`);
-				cb(null);
-			}
-		});
-		session.start();
+		runCmd(target,[{cmd:cmd,msg:"setup network"}],cb);
 	},function (err) {
 		if(err) {
 			callback(err);
@@ -307,41 +288,10 @@ setupNetwork = function (targets,test,callback) {
 teardownNetwork = function (targets,test,callback) {
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
+		let privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
 		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
 		cmd = `network-tests/tests/${test}/teardown-network.sh ${ipsArg} --port ${NETSERVERPORT} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
-		var session = new ssh({
-			host: devices[target].ip_public.address,
-			user: "root",
-			key: pair.private
-		});
-		// start the netserver container
-		log(`${target}: ${cmd}`);
-		session.exec(cmd,{
-			exit: function (code,stdout,stderr) {
-				if (code !== 0) {
-					log(`code: ${code}`);
-					log(stdout);
-					log(stderr);
-					errCode = true;
-					session.end();
-					cb(target+": Failed to tear down network");
-				}
-			}
-		});
-		session.on('error',function (err) {
-			log(target+": ssh error connecting to tear down network");
-			log(err);
-			session.end();
-			cb(target+": ssh connection failed");
-		});
-		session.on('close',function (hadError) {
-			if (!hadError && !errCode) {
-				log(`${target}: network torn down successfully`);
-				cb(null);
-			}
-		});
-		session.start();
+		runCmd(target,[{cmd:cmd,msg:"tear down network"}],cb);
 	},function (err) {
 		if(err) {
 			callback(err);
@@ -355,44 +305,12 @@ startReflectors = function (targets,test,callback) {
 	let targetIds = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
+		let privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
 		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
-		script = `network-tests/tests/${test}/start-reflector.sh ${ipsArg} --port ${NETSERVERPORT} --dataport ${NETSERVERDATAPORT}`;
+		cmd = `network-tests/tests/${test}/start-reflector.sh ${ipsArg} --port ${NETSERVERPORT} --dataport ${NETSERVERDATAPORT}`;
 		targetIds[target] = {};
-		var session = new ssh({
-			host: devices[target].ip_public.address,
-			user: "root",
-			key: pair.private
-		});
-		// start the netserver container
-		log(`${target}: ${script}`);
-		session.exec(script,{
-			exit: function (code,stdout,stderr) {
-				if (code !== 0) {
-					log(`code: ${code}`);
-					log(stdout);
-					log(stderr);
-					errCode = true;
-					session.end();
-					cb(target+": Failed to start netserver");
-				} else {
-					targetIds[target].id = stdout.replace(/\n/,'').replace(/\s+/,'');
-				}
-			}
-		});
-		session.on('error',function (err) {
-			log(target+": ssh error connecting to start netserver");
-			log(err);
-			session.end();
-			cb(target+": ssh connection failed");
-		});
-		session.on('close',function (hadError) {
-			if (!hadError && !errCode) {
-				log(target+": netserver started "+targetIds[target].id);
-				cb(null);
-			}
-		});
-		session.start();
+		// start the netserver
+		runCmd(target,[{cmd:cmd,msg:"start netserver"}],cb);
 	},function (err) {
 		if(err) {
 			callback(err);
@@ -406,49 +324,19 @@ getReflectorIp = function (targets,test,callback) {
 	let ips = {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let errCode = false, privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
+		let privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
 		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
 		cmd = `network-tests/tests/${test}/get-reflector-ip.sh ${ipsArg}`;
 		log(`${target}: getting reflector IP`);
 		log(`${target}: ${cmd}`);
-		var session = new ssh({
-			host: devices[target].ip_public.address,
-			user: "root",
-			key: pair.private
-		});
-		// get the reflector IP
-
-		session.exec(cmd,{
-			exit: function (code,stdout,stderr) {
-				if (code !== 0) {
-					errCode = true;
-					log(`code: ${code}`);
-					log(stdout);
-					log(stderr);
-					session.end();
-					cb(target+": Failed to get netserver IP");
-				} else {
-					// the stdout response should be a space separated list of IPs. The first is for local, the second is for remote
-					let ip = stdout.replace(/\s+/g," ").replace(/(^\s+|\s+$)/,'').split(/\s/);
-					ips[target] = {local:ip[0],remote:ip[1]};
-					log(`${target}: retrieved netserver IP local:${ips[target].local} remote:${ips[target].remote}`);
-				}
+		runCmd(target,[{cmd:cmd,msg:"get netserver IP"}],function (err,data) {
+			if (!err) {
+				let ip = data.replace(/\s+/g," ").replace(/(^\s+|\s+$)/,'').split(/\s/);
+				ips[target] = {local:ip[0],remote:ip[1]};
+				log(`${target}: retrieved netserver IP local:${ips[target].local} remote:${ips[target].remote}`);
 			}
+			cb(err);
 		});
-		session.on('error',function (err) {
-			log(target+": ssh error connecting to start netserver");
-			log(err);
-			session.end();
-			cb(target+": ssh connection failed");
-		});
-		session.on('close',function (hadError) {
-			if (!hadError && !errCode) {
-				log("get-reflector-ip session closed");
-				cb(null);
-			}
-		});
-		session.start();
-
 	},function (err) {
 		if(err) {
 			callback(err);
@@ -463,49 +351,20 @@ getHostIps = function (devs,test,callback) {
 	if (fs.existsSync(`upload/tests/${test}/get-host-ip.sh`)) {
 		// now start the reflector on each
 		async.each(devs,function (target,cb) {
-			let errCode = false, privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
+			let privateIps = devices[target].ip_private_net, privateIpCidr = devices[target].ip_private_net_cidr,
 			ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
 			cmd = `network-tests/tests/${test}/get-host-ip.sh ${ipsArg}`;
 			log(`${target}: getting host allocated IP`);
 			log(`${target}: ${cmd}`);
-			var session = new ssh({
-				host: devices[target].ip_public.address,
-				user: "root",
-				key: pair.private
-			});
-			// get the reflector IP
 
-			session.exec(cmd,{
-				exit: function (code,stdout,stderr) {
-					log(stdout);
-					if (code !== 0) {
-						errCode = true;
-						log(`code: ${code}`);
-						log(stdout);
-						log(stderr);
-						session.end();
-						cb(target+": Failed to get host allocated IP");
-					} else {
-						// the stdout response should be a space separated list of IPs. The first is for local, the second is for remote
-						ips[target] = stdout.replace(/\s+/g," ").replace(/(^\s+|\s+$)/,'').split(/\s/);
-						log(`${target}: retrieved allocated IPs ${ips[target].join(",")}`);
-					}
+			runCmd(target,[{cmd:cmd,msg:"get host used IPs"}],function (err,data) {
+				if (!err) {
+					// the stdout response should be a space separated list of IPs. The first is for local, the second is for remote
+					ips[target] = data.replace(/\s+/g," ").replace(/(^\s+|\s+$)/,'').split(/\s/);
+					log(`${target}: retrieved allocated IPs ${ips[target].join(",")}`);
 				}
+				cb(err);
 			});
-			session.on('error',function (err) {
-				log(target+": ssh error connecting to start netserver");
-				log(err);
-				session.end();
-				cb(target+": ssh connection failed");
-			});
-			session.on('close',function (hadError) {
-				if (!hadError && !errCode) {
-					log("get-host-ip session closed");
-					cb(null);
-				}
-			});
-			session.start();
-
 		},function (err) {
 			if(err) {
 				callback(err);
@@ -523,48 +382,16 @@ initializeTests = function (tests,targets,test,callback) {
 	// this must be run in series so they don't impact each other
 	if (fs.existsSync(`upload/tests/${test}/init-test.sh`)) {
 		async.mapSeries(tests,function (t,cb) {
-			let msg = test+" init test: "+t.type+" "+t.protocol+" "+t.size, output,
-			target = targets[t.to].ip[t.type],
-			errCode = false;
-			log(t.from+": initializing "+msg);
+			let msg = test+" init test: "+t.type+" "+t.protocol+" "+t.size,
+			target = targets[t.to].ip[t.type];
 			// get the private IP for the device
-			let session = new ssh({
-				host: devices[t.from].ip_public.address,
-				user: "root",
-				key: pair.private
-			}),
-			privateIps = devices[t.from].ip_private_net, privateIpCidr = devices[t.from].ip_private_net_cidr,
+			let privateIps = devices[t.from].ip_private_net, privateIpCidr = devices[t.from].ip_private_net_cidr,
 			ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
 			cmd = `network-tests/tests/${t.test}/init-test.sh ${ipsArg} --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT}`;
-			log(`${t.from}: ${cmd}`);
-			session.exec(cmd, {
-				exit: function (code,stdout,stderr) {
-					if (code !== 0) {
-						log(`code: ${code}`);
-						log(stdout);
-						log(stderr);
-						errCode = true;
-						session.end();
-						cb(t.from+": init-test failed");
-					} else {
-						output = stdout;
-					}
-				}
-			})
-			;
-			session.on('error',function (err) {
-				log(t.from+": ssh error connecting for "+msg);
-				log(err);
-				session.end();
-				cb(t.from+": ssh connection failed");
-			});
-			session.on('close',function (hadError) {
-				if (!hadError && !errCode) {
-					log(t.from+": init test complete: "+msg);
-					cb(null);
-				}
-			});
-			session.start();
+
+			log(t.from+": initializing "+msg);
+			runCmd(t.from,[{cmd:cmd,msg:"init-test"}],cb);
+
 		},function (err) {
 			callback(err);
 		});
@@ -578,49 +405,16 @@ initializeTests = function (tests,targets,test,callback) {
 runTests = function (tests,targets,msgPrefix,callback) {
 	// this must be run in series so they don't impact each other
 	async.mapSeries(tests,function (t,cb) {
-		let msg = msgPrefix+" test: "+t.type+" "+t.protocol+" "+t.size, output,
-		target = targets[t.to].ip[t.type],
-		errCode = false;
+		let msg = msgPrefix+" test: "+t.type+" "+t.protocol+" "+t.size,
+		target = targets[t.to].ip[t.type];
 		log(t.from+": running "+msg);
 		// get the private IP for the device
-		let session = new ssh({
-			host: devices[t.from].ip_public.address,
-			user: "root",
-			key: pair.private
-		}),
-		privateIps = devices[t.from].ip_private_net, privateIpCidr = devices[t.from].ip_private_net_cidr,
+		let privateIps = devices[t.from].ip_private_net, privateIpCidr = devices[t.from].ip_private_net_cidr,
 		ipsArg = privateIps.length === 0 ? '' : `--ips ${privateIps.join(",")} --ipcidr ${privateIpCidr}`,
-		cmd = `network-tests/tests/${t.test}/run-test.sh  ${ipsArg} --target ${target} --protocol ${t.protocol} --reps ${t.reps} --port ${t.port} --size ${t.size} --localport ${NETSERVERLOCALPORT} --dataport ${NETSERVERDATAPORT} --units ${TESTUNITS}`;
-		log(`${t.from}: ${cmd}`);
-		session.exec(cmd, {
-			exit: function (code,stdout,stderr) {
-				if (code !== 0) {
-					log(`code: ${code}`);
-					log(stdout);
-					log(stderr);
-					errCode = true;
-					session.end();
-					cb(t.from+": run-test failed");
-				} else {
-					output = stdout;
-				}
-			}
-		})
-		;
-		session.on('error',function (err) {
-			log(t.from+": ssh error connecting for "+msg);
-			log(err);
-			session.end();
-			cb(t.from+": ssh connection failed");
+		cmd = `network-tests/tests/${t.test}/run-test.sh ${ipsArg} netperf -P 0 -H ${target} -c -t ${t.protocol}_RR -l -${t.reps} -v 2 -p ${t.port} -- -k ${TESTUNITS} -r ${t.size},${t.size} -P ${NETSERVERLOCALPORT},${NETSERVERDATAPORT}`;
+		runCmd(target,[{cmd:cmd,msg:"run-test"}],function (err,data) {
+			cb(err,_.extend({},t,{results:data}));
 		});
-		session.on('close',function (hadError) {
-			if (!hadError && !errCode) {
-				log(t.from+": test complete: "+msg);
-				// save the results from this test
-				cb(null,_.extend({},t,{results:output}));
-			}
-		});
-		session.start();
 	},callback);
 },
 
@@ -630,35 +424,8 @@ runTests = function (tests,targets,msgPrefix,callback) {
 stopReflectors = function (targets,test,callback) {
 	// stop the netserver reflectors
 	async.each(_.keys(targets),function (target,cb) {
-		let errCode = false;
-		var session = new ssh({
-			host: devices[target].ip_public.address,
-			user: "root",
-			key: pair.private
-		});
-		// stop the netserver container
-		session.exec(`network-tests/tests/${test}/stop-reflector.sh`,{
-			exit: function (code) {
-				if (code !== 0) {
-					errCode = true;
-					session.end();
-					cb(target+": Failed to stop netserver "+targets[target].id);
-				}
-			}
-		});
-		session.on('error',function (err) {
-			log(target+": ssh error connecting to stop netserver");
-			log(err);
-			session.end();
-			cb(target+": ssh connection failed");
-		});
-		session.on('close',function (hadError) {
-			if (!hadError && !errCode) {
-				log(target+": netserver stopped "+targets[target].id);
-				cb(null);
-			}
-		});
-		session.start();
+		let cmd = `network-tests/tests/${test}/stop-reflector.sh`;
+		runCmd(target,[{cmd:cmd,msg:"stop netserver"}],cb);
 	},callback);
 },
 
@@ -988,76 +755,13 @@ async.waterfall([
 			peerName = getPeerName(item),
 			peer = devices[peerName].ip_private_mgmt;
 			log(item+": installing software on "+ipaddr);
-			var session = new ssh({
-				host: ipaddr,
-				user: "root",
-				key: pair.private
-			});
-			session
-				.exec(`network-tests/scripts/01-installetcd.sh --peer ${peer} --peername ${peerName}`,{
-					exit: function (code,stdout,stderr) {
-						if (code !== 0) {
-							log(item+": Failed to install etcd");
-							log(stdout);
-							log(stderr);
-							session.end();
-						} else {
-							log(`${item}: etcd installed`);
-						}
-					}
-				})
-				.exec('network-tests/scripts/02-installdocker.sh',{
-					exit: function (code) {
-						if (code !== 0) {
-							log(item+": Failed to install docker");
-							session.end();
-						} else {
-							log(`${item}: docker installed`);
-						}
-					}
-				})
-				.exec('network-tests/scripts/03-installnetperf.sh',{
-					exit: function (code) {
-						if (code !== 0) {
-							log(item+": Failed to install netperf");
-							session.end();
-						} else {
-							log(`${item}: netperf installed`);
-						}
-					}
-				})
-				.exec('network-tests/scripts/04-installpciutils.sh',{
-					exit: function (code) {
-						if (code !== 0) {
-							log(item+": Failed to install pciutils");
-							session.end();
-						} else {
-							log(`${item}: pciutils installed`);
-						}
-					}
-				})
-				.exec('docker build -t netperf network-tests/image',{
-					exit: function (code) {
-						if (code !== 0) {
-							log(item+": Failed to build netperf image");
-							session.end();
-						}
-					}
-				})
-				;
-				session.on('error',function (err) {
-					log(item+": error install software");
-					log(err);
-					session.end();
-					cb(item+": ssh connection failed");
-				})
-				.on('close',function (hadError) {
-					if (!hadError) {
-						log(item+": complete");
-						cb(null);
-					}
-				});
-				session.start();
+			runCmd(ipaddr,[
+				{cmd: `network-tests/scripts/01-installetcd.sh --peer ${peer} --peername ${peerName}`, msg:"install etcd"},
+				{cmd: `network-tests/scripts/02-installdocker.sh`, msg:"install docker"},
+				{cmd: `network-tests/scripts/03-installnetperf.sh`, msg:"install netperf"},
+				{cmd: `network-tests/scripts/04-installpciutils.sh`, msg:"install pciutils"},
+				{cmd: `docker build -t netperf network-tests/image`, msg:"build netperf image"}
+			],cb);
 		}, function (err) {
 			if (err) {
 				log("failed to install software");
@@ -1076,41 +780,12 @@ async.waterfall([
 			// get the private IP for the device
 			let ipaddr = devices[item].ip_public.address;
 			log(`${item}: setting kernel parameters`);
-			var session = new ssh({
-				host: ipaddr,
-				user: "root",
-				key: pair.private
+			runCmd(ipaddr,[{cmd:`network-tests/scripts/99-assignbusses.sh`,msg:"set kernel parameters"}],function (err,data) {
+				if (data.indexOf("REBOOT") > -1) {
+					reboot = true;
+				}
+				cb(err);
 			});
-			session
-				.exec(`network-tests/scripts/99-assignbusses.sh`,{
-					exit: function (code,stdout,stderr) {
-						if (code !== 0) {
-							log(item+": Failed to set kernel parameters");
-							log(stdout);
-							log(stderr);
-							session.end();
-						} else {
-							log(`${item}: kernel parameters set`);
-							if (stdout.indexOf("REBOOT") > -1) {
-								reboot = true;
-							}
-						}
-					}
-				})
-				;
-				session.on('error',function (err) {
-					log(item+": error setting kernel parameters");
-					log(err);
-					session.end();
-					cb(item+": ssh connection failed");
-				})
-				.on('close',function (hadError) {
-					if (!hadError) {
-						log(`${item}: kernel set complete`);
-						cb(null);
-					}
-				});
-				session.start();
 		}, function (err) {
 			if (err) {
 				log("failed to set kernel parameters");
