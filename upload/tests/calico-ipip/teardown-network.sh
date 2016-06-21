@@ -5,7 +5,7 @@ set -e
 # only remove the network once, on the source, if it exists
 
 if docker network ls | grep -wq calico; then
-	docker network rm calico
+	docker network rm calico || true
 fi
 calicoctl node stop
 calicoctl node remove
@@ -15,4 +15,5 @@ calicoctl node remove
 IPRANGE=192.168.0.0/16
 
 # open the firewall ports necessary
-firewall-cmd --zone=trusted --remove-source=$IPRANGE
+firewall-cmd --zone=trusted --remove-source=$IPRANGE || true
+
