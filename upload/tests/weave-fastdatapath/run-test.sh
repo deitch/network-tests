@@ -2,5 +2,5 @@
 
 set -e
 
-docker run --rm --net=weave --name=netperf netperf $1
+docker run --rm --net=weave --name=netperf netperf $@
 

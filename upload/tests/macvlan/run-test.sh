@@ -35,7 +35,7 @@ if [[ "$DEVTYPE" == "source" ]]; then
 	nsenter --target $pid --net ping -c 3 -W 2 $PRIVATEGATEWAY >/dev/null 2>&1 || true
 fi
 
-docker exec -i netperf $1
+docker exec -i netperf $@
 docker kill netperf >/dev/null 2>&1
 docker rm netperf >/dev/null 2>&1
 

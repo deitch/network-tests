@@ -3,5 +3,5 @@
 set -e
 
 
-docker run --rm --net=overlay --name=netperf netperf $1
+docker run --rm --net=overlay --name=netperf netperf $@
 

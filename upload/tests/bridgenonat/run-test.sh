@@ -32,7 +32,7 @@ nsenter --target $pid --net ip route add default via $IP2 dev eth0
 
 
 
-docker exec -i netperf $1
+docker exec -i netperf $@
 docker kill netperf >/dev/null 2>&1
 docker rm netperf >/dev/null 2>&1
 

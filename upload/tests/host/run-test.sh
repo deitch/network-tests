@@ -2,5 +2,5 @@
 
 set -e
 
-docker run --rm --net=host netperf $1
+docker run --rm --net=host netperf $@
 
