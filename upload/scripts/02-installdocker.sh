@@ -18,9 +18,6 @@ mgmt=${mgmt%%/*}
 # if it is already running, stop it
 systemctl stop docker
 
-# clear out any old configs that may get in the way
-rm -rf /var/lib/docker
-
 # ensure that it runs with a shared KV store
 # restart docker daemon with 
 # --cluster-store=etcd://<ETCD IP>:2379
