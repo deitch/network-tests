@@ -3,7 +3,7 @@
 set -e
 
 # do we already have etcd?
-if command -v "docker" > /dev/null 2>&1; then
+if command -v "etcd" > /dev/null 2>&1; then
 	yum update etcd
 else 
 	yum install -y etcd
@@ -23,8 +23,6 @@ CONF_FILE=/etc/etcd/etcd.conf
 
 # make sure no existing etcd is running
 systemctl stop etcd
-
-/bin/rm -rf $DATA_DIR
 
 cat > $CONF_FILE <<EOF
 [member]
