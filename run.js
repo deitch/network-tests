@@ -1,9 +1,9 @@
 /*jslint node:true, esversion:6 */
 
 var fs = require('fs'), Packet = require('packet-nodejs'), async = require('async'), _ = require('lodash'), 
-scp = require('scp2'), CIDR = require('cidr-js'), Addr = require('netaddr').Addr,
+scp = require('scp2'), CIDR = require('cidr-js'), Addr = require('netaddr').Addr, mkdirp = require('mkdirp'),
 ssh = require('simple-ssh'), keypair = require('keypair'), forge = require('node-forge'), jsonfile = require('jsonfile'),
-argv = require('minimist')(process.argv.slice(2));
+argv = require('minimist')(process.argv.slice(2)), outstream;
 
 // import the token from the file token
 const TOKEN = fs.readFileSync('token').toString().replace(/\n/,''), pkt = new Packet(TOKEN),
@@ -19,7 +19,9 @@ NETSERVERPORT = 7002,
 NETSERVERDATAPORT = 7003,
 NETSERVERLOCALPORT = 7004,
 REPETITIONS = 50000,
-TESTUNITS="LOCAL_CPU_UTIL,RT_LATENCY,MEAN_LATENCY,MIN_LATENCY,MAX_LATENCY,P50_LATENCY,P90_LATENCY,P99_LATENCY",
+TESTUNITS=[
+	"LOCAL_CPU_UTIL","RT_LATENCY","MEAN_LATENCY","MIN_LATENCY","MAX_LATENCY","P50_LATENCY","P90_LATENCY","P99_LATENCY"
+],
 SIZETOCIDR = {
 	1: 32,
 	2: 31,
@@ -29,6 +31,11 @@ SIZETOCIDR = {
 	32: 27,
 	64: 26
 },
+CSVHEADERS = [
+	'test', 'type', 'hosttype', 'from', 'to', 'reps', 'size', 'protocol'
+],
+outdir = './dist/'+PROJDATE.replace(/[:\.]/g,'_')+'/',
+outdatafile = outdir+'data.csv',
 
 
 
@@ -62,7 +69,7 @@ const genTestList = function (params) {
 			_.each(params.networks, function (nettest) {
 				_.each(_.keys(_.pickBy(params.devices,{purpose:"target"})),function (dev) {
 					let from = nettest === "local" ? dev : dev.replace('target','source');
-					tests.push({test: params.test, type: nettest, from:from, to:dev, port:params.port, reps: params.reps, size: size, protocol: proto});
+					tests.push({test: params.test, type: nettest, hosttype: devices[dev].type,from:from, to:dev, port:params.port, reps: params.reps, size: size, protocol: proto});
 				});
 			});
 		});
@@ -253,7 +260,6 @@ runCmd = function (host,cmds,callback) {
 	});
 	session.on('close',function (hadError) {
 		if (!hadError && !errCode) {
-			log(`${host}: success`);
 			callback(null,output);
 		}
 	});
@@ -430,8 +436,8 @@ runTests = function (tests,targets,msgPrefix,callback) {
 		target = targets[t.to].ip[t.type];
 		log(t.from+": running "+msg);
 		// get the private IP for the device
-		let cmd = `network-tests/tests/${t.test}/run-test.sh netperf -P 0 -H ${target} -c -t ${t.protocol}_RR -l -${t.reps} -v 2 -p ${t.port} -- -k ${TESTUNITS} -r ${t.size},${t.size} -P ${NETSERVERLOCALPORT},${NETSERVERDATAPORT}`;
-		runCmd(target,[{cmd:cmd,msg:"run-test"}],function (err,data) {
+		let cmd = `network-tests/tests/${t.test}/run-test.sh netperf -P 0 -H ${target} -c -t ${t.protocol}_RR -l -${t.reps} -v 2 -p ${t.port} -- -k ${TESTUNITS.join(",")} -r ${t.size},${t.size} -P ${NETSERVERLOCALPORT},${NETSERVERDATAPORT}`;
+		runCmd(t.from,[{cmd:cmd,msg:"run-test"}],function (err,data) {
 			cb(err,_.extend({},t,{results:data}));
 		});
 	},callback);
@@ -607,7 +613,32 @@ activeTests = argv.test ? _.uniq(_.reduce([].concat(argv.test),function (result,
 	return result;
 },[])) : TESTS,
 activeNetworks = _.uniq([].concat(argv.network || NETWORKS)),
-totalResults = []
+totalResults = [],
+saveTestResults = function (results,cb) {
+	// do we have an output file?
+	results = results || [];
+	totalResults.push.apply(totalResults,results);
+	// write the result line to outdatafile
+	// each line is the data, plus the results
+	if (results.length > 0) {
+		_.each(results,function (t) {
+			// first get the fixed information
+			let data = t.results || '', fixedLine = _.map(CSVHEADERS,function (field) {
+				return t[field];
+			}),
+			dataAsMap = _.reduce(data.split(/\n/),function (keyMap,item) {
+				let parts = item.split('=',2);
+				keyMap[parts[0]] = parts[1];
+				return keyMap;
+			},{}),
+			dataLine = _.map(TESTUNITS,function (field) {
+				return dataAsMap[field];
+			});
+			outstream.write(_.concat(fixedLine,dataLine).join(',')+'\n');
+		});
+	}
+	cb(null);
+}
 ;
 
 if (argv.help || argv.h) {
@@ -629,6 +660,22 @@ if (fs.existsSync(SSHFILE)) {
 	pair.sshPublicKey = forge.ssh.publicKeyToOpenSSH(forge.pki.publicKeyFromPem(pair.public),"ULL-test-user@atomicinc.com");
 	jsonfile.writeFileSync(SSHFILE,pair);
 }
+
+// create the output directory
+log(`creating output directory ${outdir}`);
+mkdirp.sync(outdir);
+log(`opening output file ${outdatafile}`);
+outstream = fs.createWriteStream(outdatafile);
+outstream.on('error',function (err) {
+	log(`error writing to ${outdatafile}`);
+	log(err);
+}).on('finish',function () {
+	log(`finished writing to ${outdatafile}`);
+}).on('close',function () {
+	log(`closed stream for ${outdatafile}`);
+});
+// our header for the csv file
+outstream.write(_.union(CSVHEADERS,TESTUNITS).join(",")+'\n');
 
 
 async.waterfall([
@@ -802,8 +849,8 @@ async.waterfall([
 			mgmt = devices[item].ip_private_mgmt,
 			peerName = getPeerName(item),
 			peer = devices[peerName].ip_private_mgmt;
-			log(item+": installing software on "+ipaddr);
-			runCmd(ipaddr,[
+			log(`${item}: installing software on ${ipaddr}`);
+			runCmd(item,[
 				{cmd: `network-tests/scripts/01-installetcd.sh ${mgmt} ${peer} ${peerName}`, msg:"install etcd"},
 				{cmd: `network-tests/scripts/02-installdocker.sh`, msg:"install docker"},
 				{cmd: `network-tests/scripts/03-installnetperf.sh`, msg:"install netperf"},
@@ -826,10 +873,9 @@ async.waterfall([
 		let reboot = false, rebootWait = 60;
 		async.each(_.keys(activeDevs), function (item,cb) {
 			// get the private IP for the device
-			let ipaddr = devices[item].ip_public;
 			log(`${item}: setting kernel parameters`);
-			runCmd(ipaddr,[{cmd:`network-tests/scripts/99-assignbusses.sh`,msg:"set kernel parameters"}],function (err,data) {
-				if (data.indexOf("REBOOT") > -1) {
+			runCmd(item,[{cmd:`network-tests/scripts/99-assignbusses.sh`,msg:"set kernel parameters"}],function (err,data) {
+				if (data && data.indexOf("REBOOT") > -1) {
 					reboot = true;
 				}
 				cb(err);
@@ -871,9 +917,9 @@ async.waterfall([
 	function (results,cb) {
 		// save the results
 		log("metal tests complete");
-		totalResults.push.apply(totalResults,results||[]);
-
-
+		saveTestResults(results,cb);
+	},
+	function (cb) {
 		// now run container tests - be sure to exclude metal
 		// THESE MUST BE SERIES, OR THEY WILL TROUNCE EACH OTHER!!
 		async.eachSeries(_.without(activeTests,'metal','sriov'),function (test,cb) {
@@ -883,11 +929,11 @@ async.waterfall([
 			runTestSuite(tests,test,function (err,data) {
 				if(err) {
 					log("container:"+test+" errors");
+					cb(err);
 				} else {
 					log("container:"+test+" complete");
-					totalResults.push.apply(totalResults,data||[]);
+					saveTestResults(data,cb);
 				}
-				cb(err);
 			});
 		},function (err) {
 			log("container tests complete");
@@ -910,8 +956,9 @@ async.waterfall([
 	function (results,cb) {
 		// save the results
 		log("sriov tests complete");
-		totalResults.push.apply(totalResults,results||[]);
-	
+		saveTestResults(results,cb);
+	},
+	function (cb) {
 		if (keepItems) {
 			log("command-line flag not to destroy servers");
 			cb(null,false);
@@ -975,11 +1022,11 @@ async.waterfall([
 	}
 	
 ],function (err) {
+	outstream.end();
 	log("test run complete");
+	log(`results in ${outdatafile}`);
 	if (err) {
 		log(err);
-	} else {
-		console.log(totalResults);
 	}
 });
 
