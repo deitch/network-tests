@@ -18,6 +18,9 @@ CHECKDELAY = 30,
 NETSERVERPORT = 7002,
 NETSERVERDATAPORT = 7003,
 NETSERVERLOCALPORT = 7004,
+NETPERF_TIMEOUT = 15, // seconds to wait to time out a test
+TIMEOUT_CODE = 124, // exit code from GNU coreutils timeout when it times out
+TIMEOUT_RETRY = 3, // how many times to try running the netperf command if it times out
 REPETITIONS = 50000,
 TESTUNITS=[
 	"LOCAL_CPU_UTIL","RT_LATENCY","MEAN_LATENCY","MIN_LATENCY","MAX_LATENCY","P50_LATENCY","P90_LATENCY","P99_LATENCY"
@@ -64,9 +67,9 @@ devices = {
 
 const genTestList = function (params) {
 	let tests = [];
-	_.each(params.protocols,function (proto) {
-		_.each(params.sizes, function (size) {
-			_.each(params.networks, function (nettest) {
+	_.each(params.networks, function (nettest) {
+		_.each(params.protocols,function (proto) {
+			_.each(params.sizes, function (size) {
 				_.each(_.keys(_.pickBy(params.devices,{purpose:"target"})),function (dev) {
 					let from = nettest === "local" ? dev : dev.replace('target','source');
 					tests.push({test: params.test, type: nettest, hosttype: devices[dev].type,from:from, to:dev, port:params.port, reps: params.reps, size: size, protocol: proto});
@@ -244,7 +247,7 @@ runCmd = function (host,cmds,callback) {
 					log(stdout);
 					errCode = true;
 					session.end();
-					callback(host+": Failed to "+msg);
+					callback({msg:host+": Failed to "+msg,code: code});
 				} else {
 					output = stdout;
 				}
@@ -436,10 +439,16 @@ runTests = function (tests,targets,msgPrefix,callback) {
 		target = targets[t.to].ip[t.type];
 		log(t.from+": running "+msg);
 		// get the private IP for the device
-		let cmd = `network-tests/tests/${t.test}/run-test.sh netperf -P 0 -H ${target} -c -t ${t.protocol}_RR -l -${t.reps} -v 2 -p ${t.port} -- -k ${TESTUNITS.join(",")} -r ${t.size},${t.size} -P ${NETSERVERLOCALPORT},${NETSERVERDATAPORT}`;
-		runCmd(t.from,[{cmd:cmd,msg:"run-test"}],function (err,data) {
-			cb(err,_.extend({},t,{results:data}));
-		});
+		let cmd = `network-tests/tests/${t.test}/run-test.sh timeout ${NETPERF_TIMEOUT} netperf -P 0 -H ${target} -c -t OMNI -l -${t.reps} -v 2 -p ${t.port} -- -k ${TESTUNITS.join(",")} -T ${t.protocol} -d rr -r ${t.size},${t.size} -P ${NETSERVERLOCALPORT},${NETSERVERDATAPORT}`;
+		// try this in case of timeout up to 3 times
+		async.retry(TIMEOUT_RETRY,function (cb) {
+			runCmd(t.from,[{cmd:cmd,msg:"run-test"}],function (err,data) {
+				if (err && err.code && err.code === TIMEOUT_CODE) {
+					log(`${t.from} netperf timed out`);
+				}
+				cb(err,_.extend({},t,{results:data}));
+			});
+		},cb);
 	},callback);
 },
 
