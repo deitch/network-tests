@@ -5,23 +5,23 @@ With each one, repeat for:
 	protocols: tcp & udp
 	packet sizes: 300, 500, 1024, 2048
 
-Bare metal:
-	local: source process on target1 -> target process on target1
+*Bare metal:
+	local: source process on source1 -> target process on source1
 	remote: source process on source1 -> target process on target1
 
-Host networking:
+*Host networking:
 	local: source container on source1 -> target container on source1 
 	remote: source container on source1 -> target container on target1 
 
-Bridge NAT (default docker network):
+*Bridge NAT (default docker network):
 	local: source container on source1 -> target container on source1 
 	remote: source container on source1 -> target container on target1 
 
-Bridge without NAT:
+*Bridge without NAT:
 	local: source container on source1 -> target container on source1 
 	remote: source container on source1 -> target container on target1 
 
-MacVlan:
+*Macvlan:
 	local: source container on source1 -> target container on source1 
 	remote: source container on source1 -> target container on target1 
 
@@ -29,28 +29,71 @@ SR-IOV:
 	local: source container on source1 -> target container on source1
 	remote: source container on source1 -> target container on target1
 
-Weave:
+*Overlay:
 	local: source container on source1 -> target container on source1
 	remote: source container on source1 -> target container on target1
 
-Flannel:
+*Flannel:
 	local: source container on source1 -> target container on source1
 	remote: source container on source1 -> target container on target1
 	
-Calico:
+*Calico: (still direct packet issue)
 	local: source container on source1 -> target container on source1
 	remote: source container on source1 -> target container on target1
 
-Weave:
+*Weave:
 	local: source container on source1 -> target container on source1
 	remote: source container on source1 -> target container on target1
 
 
-Summary:
-	10 categories of tests: 8 = bare metal benchmark
-	2 tests in each category
-	2 server types
-	2 protocols
-	4 packet sizes
-		10 categories * 2 tests in each category * 2 server types * 2 protocols * 4 packet sizes = 320 tests
+The process of running a test is as follows. Some do not need every stage.
+	0- network.conf - reports in JSON how many IPs it needs per host or per network
+	1- setup-network
+	2- start-reflector
+	3- get-reflector-ip
+	4- get-host-ips
+	5- run-test
+	6- stop-reflector
+	7- teardown-network
 
+Running the Test:
+	Test types that use a built-in or libnetwork-compatible test can just run the test:
+		docker run -it --net=whatever --name=netperf netperf netperf -H .....
+
+	Test types that require plumbing in the network after a container is running require three steps:
+		docker run -it -d --net=none --name=netperf netperf sh
+		nsenter --target $pid --net ip addr ....
+		docker exec -it netperf netperf -H ....
+
+Bridge without NAT:
+	Requires a /29 block of 8 addresses per host
+	Use the 2nd address as the br0 address/29
+	Use the 3rd and 4th addresses as eth0 inside the containers
+	Set the default route to the address of the br0
+
+Macvlan:
+	Requires a /29 block of 8 addresses per host
+		Local: Use the /29 addresses and they will communicate with each other
+		Remote:
+			No clean solution; for now, will need to take management IP off of team0, add it to the source container, add route
+			10.0.0.0/8 to the other side of the /31 (replicate host)
+			When done, remove from container and put back on host
+			/25 doesn't work, because the remote server will look like it is on the same L2, but it isn't, and packets will fail
+			/29 doesn't work, because the router is outside the /29, so we need something to bridge it. 
+				With LinuxBridge, that was the br0 address
+			Only way to do this is above: take management IP off of team0, add to source container, add route, and then put back
+
+Calico Native:
+	Calico (without ipip) requires all hosts either to be on the same L2, or for the L3 switches/routers to participate in BGP.
+	Right now this is not available with Packet.net (they are working on adding it to the portal).
+	The way we work around it is:
+		1. Assign a /26 (half of the assigned /25) as a Calico pool
+		2. After starting the reflector (which assigns an IP) and init-test (which also assigns an IP), run get-host-ips.sh which returns the list of IPs assigned to this host
+		3. Use the Packet.net API to assign these to the host in the SDN
+
+How do we assign private IPs? Not all tests require them.
+		bridgenonat: 8 addresses /29 per host
+		calico-native: 64 addresses /26 for entire network
+		macvlan: 8 addresses /29 per host
+
+		
