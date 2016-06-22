@@ -1072,7 +1072,7 @@ async.waterfall([
 	if (err) {
 		log(err);
 	}
-	let endTime = new Date().getTime(), duration = moment(endTime-startTime);
+	let endTime = new Date().getTime(), duration = moment.duration(endTime-startTime);
 	log(`TEST END: ${new Date(endTime).toISOString()}`);
 	log(`TEST DURATION: ${duration.hours()}:${duration.minutes()}:${duration.seconds()}.${duration.milliseconds()}`);
 });
