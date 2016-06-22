@@ -465,19 +465,30 @@ runTests = function (tests,targets,msgPrefix,config,callback) {
 		config = config || {};
 		let msg = msgPrefix+" test: "+t.type+" "+t.protocol+" "+t.size,
 		timeout = config.timeout || NETPERF_TIMEOUT,
-		target = targets[t.to].ip[t.type];
+		retry = config.retry || TIMEOUT_RETRY,
+		target = targets[t.to].ip[t.type],
+		timeoutError = false;
 		log(t.from+": running "+msg);
 		// get the private IP for the device
 		let cmd = `network-tests/tests/${t.test}/run-test.sh timeout ${timeout} netperf -P 0 -H ${target} -c -t OMNI -l -${t.reps} -v 2 -p ${t.port} -- -k ${TESTUNITS.join(",")} -T ${t.protocol} -d rr -r ${t.size},${t.size} -P ${NETSERVERLOCALPORT},${NETSERVERDATAPORT}`;
 		// try this in case of timeout up to 3 times
-		async.retry(TIMEOUT_RETRY,function (cb) {
+		async.retry(retry,function (cb) {
 			runCmd(t.from,[{cmd:cmd,msg:"run-test"}],function (err,data) {
 				if (err && err.code && err.code === TIMEOUT_CODE) {
+					timeoutError = true;
 					log(`${t.from} netperf timed out`);
 				}
 				cb(err,_.extend({},t,{results:data}));
 			});
-		},cb);
+		},function (err,data) {
+			// we failed a given test the retry number of times, just move on
+			if (err && timeoutError) {
+				log(`${t.from}: failed ${retry} times for ${msg}; skipping`);
+				cb(null,null);
+			} else {
+				cb(err,data);
+			}
+		});
 	},callback);
 },
 
