@@ -411,16 +411,35 @@ getHostIps = function (devs,test,callback) {
 },
 
 
-initializeTests = function (tests,targets,test,callback) {
+initializeTests = function (tests,test,callback) {
 	// this must be run in series so they don't impact each other
 	if (fs.existsSync(`upload/tests/${test}/init-test.sh`)) {
-		async.mapSeries(tests,function (t,cb) {
-			let msg = test+" init test: "+t.type+" "+t.protocol+" "+t.size;
-			// get the private IP for the device
-			let cmd = `network-tests/tests/${t.test}/init-test.sh`;
+		// every test.from should have init test run exactly once
+		async.mapSeries(_.uniq(_.map(tests,'from')),function (host,cb) {
+			let msg = `${host}: init test ${test}`,
+			cmd = `network-tests/tests/${test}/init-test.sh`;
 
-			log(t.from+": initializing "+msg);
-			runCmd(t.from,[{cmd:cmd,msg:"init-test"}],cb);
+			log(msg);
+			runCmd(host,[{cmd:cmd,msg:"init-test"}],cb);
+
+		},function (err) {
+			callback(err);
+		});
+	} else {
+		callback(null);
+	}
+},
+
+termTests = function (tests,test,callback) {
+	// this must be run in series so they don't impact each other
+	if (fs.existsSync(`upload/tests/${test}/term-test.sh`)) {
+		// every test.from should have term test run exactly once
+		async.mapSeries(_.uniq(_.map(tests,'from')),function (host,cb) {
+			let msg = `${host}: term test ${test}`,
+			cmd = `network-tests/tests/${test}/term-test.sh`;
+
+			log(msg);
+			runCmd(host,[{cmd:cmd,msg:"term-test"}],cb);
 
 		},function (err) {
 			callback(err);
@@ -544,7 +563,7 @@ runTestSuite = function (tests,test,callback) {
 			_.forEach(res,function (value,key) {
 				targetIds[key].ip = value;
 			});
-			initializeTests(tests,targetIds,test,cb);
+			initializeTests(tests,test,cb);
 		},
 		function (cb) {
 			getHostIps(allDevs,test,cb);
@@ -557,6 +576,9 @@ runTestSuite = function (tests,test,callback) {
 		},
 		function (res,cb) {
 			allResults = res;
+			termTests(tests,test,cb);
+		},
+		function (cb) {
 			stopReflectors(targetIds,test,cb);
 		},
 		function (cb) {
