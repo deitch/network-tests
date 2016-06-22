@@ -124,9 +124,10 @@ freeProjectIps = function (cb) {
 	],cb);
 },
 
-getTestNetworkConfig = function (test,cb) {
-	let confFile = `./upload/tests/${test}/network.json`;
+getTestConfig = function (test,cb) {
+	let confFile = `./upload/tests/${test}/config.json`;
 	if (fs.existsSync(confFile)) {
+		log(`reading ${confFile}`);
 		jsonfile.readFile(confFile,cb);
 	} else {
 		cb(null,null);
@@ -456,14 +457,16 @@ termTests = function (tests,test,callback) {
 
 
 
-runTests = function (tests,targets,msgPrefix,callback) {
+runTests = function (tests,targets,msgPrefix,config,callback) {
 	// this must be run in series so they don't impact each other
 	async.mapSeries(tests,function (t,cb) {
+		config = config || {};
 		let msg = msgPrefix+" test: "+t.type+" "+t.protocol+" "+t.size,
+		timeout = config.timeout || NETPERF_TIMEOUT,
 		target = targets[t.to].ip[t.type];
 		log(t.from+": running "+msg);
 		// get the private IP for the device
-		let cmd = `network-tests/tests/${t.test}/run-test.sh timeout ${NETPERF_TIMEOUT} netperf -P 0 -H ${target} -c -t OMNI -l -${t.reps} -v 2 -p ${t.port} -- -k ${TESTUNITS.join(",")} -T ${t.protocol} -d rr -r ${t.size},${t.size} -P ${NETSERVERLOCALPORT},${NETSERVERDATAPORT}`;
+		let cmd = `network-tests/tests/${t.test}/run-test.sh timeout ${timeout} netperf -P 0 -H ${target} -c -t OMNI -l -${t.reps} -v 2 -p ${t.port} -- -k ${TESTUNITS.join(",")} -T ${t.protocol} -d rr -r ${t.size},${t.size} -P ${NETSERVERLOCALPORT},${NETSERVERDATAPORT}`;
 		// try this in case of timeout up to 3 times
 		async.retry(TIMEOUT_RETRY,function (cb) {
 			runCmd(t.from,[{cmd:cmd,msg:"run-test"}],function (err,data) {
@@ -491,7 +494,7 @@ runTestSuite = function (tests,test,callback) {
 	// need to start the reflector container on each target
 	
 	// find all of the targets
-	let targets = _.uniq(_.map(tests,"to")), allDevs = _.keys(activeDevs), targetIds = {}, allResults;
+	let targets = _.uniq(_.map(tests,"to")), allDevs = _.keys(activeDevs), targetIds = {}, allResults, testConfig;
 	
 	// clear target env
 	_.each(allDevs,function (host) {
@@ -511,16 +514,15 @@ runTestSuite = function (tests,test,callback) {
 		},
 		// get the network.conf
 		function (cb) {
-			getTestNetworkConfig(test,cb);
+			getTestConfig(test,cb);
 		},
 		// map the IPs to the hosts
 		function (res,cb) {
+			testConfig = res;
 			if (!res) {
 				cb(null,null);
-			} else if (res.network !== undefined) {
-				mapIps({hosts: allDevs, perhost:false, size: res.network},cb);
-			} else if (res.host !== undefined) {
-				mapIps({hosts: allDevs, perhost: true, size: res.host},cb);
+			} else if (res.addresses !== undefined) {
+				mapIps({hosts: allDevs, perhost:res.type === "host", size: res.addresses},cb);
 			} else {
 				cb(null,null);
 			}
@@ -578,7 +580,7 @@ runTestSuite = function (tests,test,callback) {
 			assignIps(res,cb);
 		},
 		function (cb) {
-			runTests(tests,targetIds,test,cb);
+			runTests(tests,targetIds,test,testConfig,cb);
 		},
 		function (res,cb) {
 			allResults = res;
