@@ -237,10 +237,15 @@ runCmd = function (host,cmds,callback) {
 	env = makeShellEnv(devices[host].env);
 	// add each cmd up
 	_.each(cmds,function (cmdset) {
-		let cmd = cmdset.cmd, msg = cmdset.msg;
+		let cmd = cmdset.cmd, msg = cmdset.msg, debug = cmdset.debug;
 		log(`${host}: ${cmd}`);
 		session.exec(`${env} ${cmd}`,{
 			exit: function (code,stdout,stderr) {
+				if (debug) {
+					log(`${host}: DEBUG CODE ${code}`);
+					log(`${host}: DEBUG STDOUT ${stdout}`);
+					log(`${host}: DEBUG STDERR ${stderr}`);
+				}
 				if (code !== 0) {
 					log(`code: ${code}`);
 					log(stderr);
@@ -295,13 +300,13 @@ getHostEnv = function (targets,callback) {
 			// data is an array of results, one for each target
 			envMap = _.reduce(targets,function (result,item,index) {
 				// convert KEY=value into js object
-				result[item] = _.reduce(data[index].split(/\n/,function (res,item) {
+				result[item] = _.reduce(data[index].split(/\n/),function (res,item) {
 					let parts = item.split('=',2);
 					if (parts.length === 2) {
 						res[parts[0]] = parts[1];
 					}
 					return res;
-				},{}));
+				},{});
 				return result;
 			},{});
 		}
@@ -548,6 +553,7 @@ runTestSuite = function (tests,test,callback) {
 					PUBLICIPCIDR: devices[host].ip_public+'/31'
 				},ipsArg,hostEnv);
 				devices[host].env = env;
+				log(`${host} env: ${makeShellEnv(env)}`);
 			});
 			setupNetwork(allDevs,test,cb);
 		},
