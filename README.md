@@ -144,7 +144,7 @@ The network performance test program used is [netperf](http://netperf.org). The 
 The specific parameters for the test run are provided by various constants in the beginning of `run.js`. However, as of this writing, the general run is:
 
 * netserver: `netserver -D -p 7002`
-* netperf: `timeout 60 netperf -P 0 -H $NETSERVERIP -c -t OMNI -l -50000 -v 2 -p 7002 -- -k $TESTUNITS -T $PROTOCOL -d rr -r $SIZE,$SIZE -P 7004,7003`
+* netperf: `timeout 30 netperf -P 0 -H $NETSERVERIP -c -t OMNI -l -50000 -v 2 -p 7002 -- -k $TESTUNITS -T $PROTOCOL -d rr -r $SIZE,$SIZE -P 7004,7003`
 
 Where:
 
@@ -160,7 +160,9 @@ TCP communication is connection-oriented. It relies on the operating system netw
 
 In order to handle this issue, the test regimen runs the entire test run of `netperf` in a `timeout` command, and retries each test up to 3 times. Only if it times out 3 times does the entire test run stop.
 
-As of this writing, the timeout is set to 60 seconds. It is important to balance discovering that a test has failed as quickly as possible with the need to allow some longer-running tests, e.g. encrypted communications, to run to their conclusion.
+As of this writing, the timeout is set to 30 seconds. It is important to balance discovering that a test has failed as quickly as possible with the need to allow some longer-running tests, e.g. encrypted communications, to run to their conclusion. Each test suite can set in its configuration that it requires a longer timeout.
+
+It would be *much* better if we could just sense that a test was stuck, but there is no clear process for that. Perhaps in the future using `netstat` to check connections, or `strace` to check waiting for an open connection.
 
 #### Test Container
 With each test run, the Dockerfile in `image/Dockerfile` is build. It is a very simple image, taking the latest [alpine](https://hub.docker.com/_/alpine/) and adding:
