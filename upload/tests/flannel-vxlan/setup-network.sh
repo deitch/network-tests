@@ -30,6 +30,10 @@ mkdir -p /etc/systemd/system/docker.service.d/
 OVERRIDE=/etc/systemd/system/docker.service.d/override.conf
 
 cat > $OVERRIDE <<EOF
+[Unit]
+After=network.target docker.socket etcd.service
+Requires=etcd.service docker.socket
+
 [Service]
 EnvironmentFile=/run/flannel/subnet.env
 ExecStart=

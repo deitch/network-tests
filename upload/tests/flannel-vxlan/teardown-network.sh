@@ -19,7 +19,7 @@ systemctl stop docker
 
 OVERRIDE=/etc/systemd/system/docker.service.d/override.conf
 if [[ -e $OVERRIDE.clean ]]; then
-	mv $OVERRIDE.clean $OVERRIDE
+	cp $OVERRIDE.clean $OVERRIDE
 fi
 
 systemctl daemon-reload

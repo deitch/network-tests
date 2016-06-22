@@ -2,5 +2,7 @@
 
 set -e
 
-docker run --rm --name=netperf netperf $@
+docker exec -i netperf $@
+
+
 
