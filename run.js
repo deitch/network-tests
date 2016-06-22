@@ -886,7 +886,7 @@ async.waterfall([
 				{cmd: `network-tests/scripts/02-installdocker.sh`, msg:"install docker"},
 				{cmd: `network-tests/scripts/03-installnetperf.sh`, msg:"install netperf"},
 				{cmd: `network-tests/scripts/04-installpciutils.sh`, msg:"install pciutils"},
-				{cmd: `network-tests/scripts/04-installnetutils.sh`, msg:"install network utilities"},
+				{cmd: `network-tests/scripts/05-installnetutils.sh`, msg:"install network utilities"},
 				{cmd: `docker build -t netperf network-tests/image`, msg:"build netperf image"}
 			],cb);
 		}, function (err) {
