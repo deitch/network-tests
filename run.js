@@ -21,7 +21,7 @@ NETSERVERDATAPORT = 7003,
 NETSERVERLOCALPORT = 7004,
 NETPERF_TIMEOUT = 30, // seconds to wait to time out a test
 TIMEOUT_CODE = 124, // exit code from GNU coreutils timeout when it times out
-TIMEOUT_RETRY = 3, // how many times to try running the netperf command if it times out
+TIMEOUT_RETRY = 5, // how many times to try running the netperf command if it times out
 REPETITIONS = 50000,
 TESTUNITS=[
 	"LOCAL_CPU_UTIL","RT_LATENCY","MEAN_LATENCY","MIN_LATENCY","MAX_LATENCY","P50_LATENCY","P90_LATENCY","P99_LATENCY"
