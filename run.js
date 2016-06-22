@@ -3,6 +3,7 @@
 var fs = require('fs'), Packet = require('packet-nodejs'), async = require('async'), _ = require('lodash'), 
 scp = require('scp2'), CIDR = require('cidr-js'), Addr = require('netaddr').Addr, mkdirp = require('mkdirp'),
 ssh = require('simple-ssh'), keypair = require('keypair'), forge = require('node-forge'), jsonfile = require('jsonfile'),
+moment = require('moment'),
 argv = require('minimist')(process.argv.slice(2)), outstream;
 
 // import the token from the file token
@@ -39,6 +40,7 @@ CSVHEADERS = [
 ],
 outdir = './dist/'+PROJDATE.replace(/[:\.]/g,'_')+'/',
 outdatafile = outdir+'data.csv',
+startTime = new Date().getTime(),
 
 
 
@@ -684,6 +686,8 @@ if (argv.help || argv.h) {
 	Usage();
 }
 
+log(`TEST START: ${new Date(startTime).toISOString()}`);
+
 log(`using devices: ${_.keys(activeDevs).join(" ")}`);
 log(`using packet sizes: ${activeSizes.join(" ")}`);
 log(`using protocols: ${activeProtocols.join(" ")}`);
@@ -1068,5 +1072,8 @@ async.waterfall([
 	if (err) {
 		log(err);
 	}
+	let endTime = new Date().getTime(), duration = moment(endTime-startTime);
+	log(`TEST END: ${new Date(endTime).toISOString()}`);
+	log(`TEST DURATION: ${duration.hours()}:${duration.minutes()}:${duration.seconds()}.${duration.milliseconds()}`);
 });
 
