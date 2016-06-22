@@ -2,5 +2,7 @@
 
 set -e
 
-docker run --rm --net=calico --name=netperf netperf $@
+npname=netperf-$(hostname)
+
+docker exec -i $npname $@
 
