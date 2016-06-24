@@ -129,6 +129,8 @@ As of this writing, the following tests are supported:
 * `weave-sleeve`: Uses Weave networking with the original sleeve encapsulation.
 * `weave-encrypted`: Uses Weave networking with sleeve encapsulation *and* encryption.
 
+**WARNING:** Do **not** run `sriov` automated with type 3 servers. The Mellanox cards used require custom-built firmware, followed by kernel module options, firmware settings and reboots. It is recommended you run all tests *except* IOV, then set that up and run manually. Fortunately, `sriov` is the last test to run, and all tests write their output to the file as they run, so you can just run all of the `--type 3` tests, let the last set fail, and just run them.
+
 
 ### Test Order
 When multiple tests are run, the following rules of order are followed:
