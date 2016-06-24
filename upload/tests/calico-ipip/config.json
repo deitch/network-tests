@@ -1,3 +1,4 @@
 {
-	"retry": 20
+	"retry": 20,
+	"timeout": 60
 }
