@@ -929,7 +929,7 @@ async.waterfall([
 		async.each(_.keys(activeDevs), function (item,cb) {
 			// get the private IP for the device
 			log(`${item}: setting kernel parameters`);
-			runCmd(item,[{cmd:`network-tests/scripts/99-assignbusses.sh`,msg:"set kernel parameters"}],function (err,data) {
+			runCmd(item,[{cmd:`network-tests/scripts/99-enablesriov.sh`,msg:"set kernel parameters"}],function (err,data) {
 				if (data && data.indexOf("REBOOT") > -1) {
 					reboot = true;
 				}
