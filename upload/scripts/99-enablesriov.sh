@@ -35,7 +35,7 @@ if lspci | grep -iqw Mellanox; then
 	fi
 	# check if SR-IOV is enabled
 	mst start
-	if [[ mlxconfig -d /dev/mst/mt4099_pciconf0 q | grep SRIOV_EN | grep -wqi false ]]; then
+	if mlxconfig -d /dev/mst/mt4099_pciconf0 q | grep SRIOV_EN | grep -wqi false ; then
 		mlxconfig -y -d /dev/mst/mt4099_pciconf0 set SRIOV_EN=1 NUM_OF_VFS=8
 		# and set the correct option
 		CONFFILE=/etc/modprobe.d/mlx4.conf
