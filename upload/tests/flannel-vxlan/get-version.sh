@@ -2,4 +2,4 @@
 
 set -e
 
-flanneld --version
+echo Flannel: $(flanneld --version)

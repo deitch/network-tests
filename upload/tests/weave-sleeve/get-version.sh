@@ -2,4 +2,4 @@
 
 set -e
 
-weave version
+echo Weave: $(weave version)

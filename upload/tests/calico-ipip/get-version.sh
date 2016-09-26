@@ -2,4 +2,4 @@
 
 set -e
 
-calicoctl version
+echo Calico: $(calicoctl version)
