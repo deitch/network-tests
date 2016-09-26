@@ -5,4 +5,5 @@ set -e
 
 # just report our OS and docker versions
 uname -a
-cat /etc/issue
+cat /etc/*release
+docker --version
