@@ -88,7 +88,7 @@ Calico Native:
 	Right now this is not available with Packet.net (they are working on adding it to the portal).
 	The way we work around it is:
 		1. Assign a /26 (half of the assigned /25) as a Calico pool
-		2. After starting the reflector (which assigns an IP) and init-test (which also assigns an IP), run get-host-ips.sh which returns the list of IPs assigned to this host
+		2. After starting the reflector (which assigns an IP) and init-test (which also assigns an IP), run get-host-ip.sh which returns the list of IPs assigned to this host
 		3. Use the Packet.net API to assign these to the host in the SDN
 
 How do we assign private IPs? Not all tests require them.
