@@ -51,10 +51,14 @@ The process of running a test is as follows. Some do not need every stage.
 	1- setup-network
 	2- start-reflector
 	3- get-reflector-ip
-	4- get-host-ips
+	4- get-host-ip
 	5- run-test
 	6- stop-reflector
 	7- teardown-network
+	8- get-version
+
+get-version is expected to return a string that will report the particular version in use for this test. It may return nothing if it so chooses.
+
 
 Running the Test:
 	Test types that use a built-in or libnetwork-compatible test can just run the test:
