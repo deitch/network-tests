@@ -96,4 +96,3 @@ How do we assign private IPs? Not all tests require them.
 		calico-native: 64 addresses /26 for entire network
 		macvlan: 8 addresses /29 per host
 
-		
