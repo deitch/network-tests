@@ -4,7 +4,7 @@ var fs = require('fs'), Packet = require('packet-nodejs'), async = require('asyn
 scp = require('scp2'), CIDR = require('cidr-js'), Addr = require('netaddr').Addr, mkdirp = require('mkdirp'),
 ssh = require('simple-ssh'), keypair = require('keypair'), forge = require('node-forge'), jsonfile = require('jsonfile'),
 moment = require('moment'),
-argv = require('minimist')(process.argv.slice(2)), outstream;
+argv = require('minimist')(process.argv.slice(2)), outstream, outconfig;
 
 // import the token from the file token
 const TOKEN = fs.readFileSync('token').toString().replace(/\n/,''), pkt = new Packet(TOKEN),
@@ -40,6 +40,7 @@ CSVHEADERS = [
 ],
 outdir = './dist/'+PROJDATE.replace(/[:\.]/g,'_')+'/',
 outdatafile = outdir+'data.csv',
+outconfigfile = outdir+'config.txt',
 startTime = new Date().getTime(),
 
 
@@ -493,6 +494,25 @@ runTests = function (tests,targets,msgPrefix,config,callback) {
 },
 
 
+getHostVersions = function (device,callback) {
+	runCmd(device,[{cmd:`network-tests/scripts/get-version.sh`,msg:"get-host-version"}],callback);
+},
+getVersions = function (device,tests,callback) {
+	async.map(tests,function (test,cb) {
+		let cmd = `tests/${test}/get-version.sh`;
+		if (fs.existsSync('./upload/'+cmd)) {
+			log("getting test version for: "+test);
+
+			runCmd(device,[{cmd:`network-tests/${cmd}`,msg:"get-version"}],cb);
+		} else {
+			log("no version provided for: "+test);
+			cb(null,null);
+		}
+	},function (err,data) {
+		log("getting test versions complete");
+		callback(err,data);
+	});
+},
 
 
 stopReflectors = function (targets,test,callback) {
@@ -666,6 +686,7 @@ activeTests = argv.test ? _.uniq(_.reduce([].concat(argv.test),function (result,
 },[])) : TESTS,
 activeNetworks = _.uniq([].concat(argv.network || NETWORKS)),
 totalResults = [],
+totalVersions = [],
 saveTestResults = function (results,cb) {
 	// do we have an output file?
 	results = results || [];
@@ -718,7 +739,7 @@ if (fs.existsSync(SSHFILE)) {
 // create the output directory
 log(`creating output directory ${outdir}`);
 mkdirp.sync(outdir);
-log(`opening output file ${outdatafile}`);
+log(`opening output data file ${outdatafile}`);
 outstream = fs.createWriteStream(outdatafile);
 outstream.on('error',function (err) {
 	log(`error writing to ${outdatafile}`);
@@ -728,6 +749,18 @@ outstream.on('error',function (err) {
 }).on('close',function () {
 	log(`closed stream for ${outdatafile}`);
 });
+
+log(`opening output config file ${outconfigfile}`);
+outconfig = fs.createWriteStream(outconfigfile);
+outconfig.on('error',function (err) {
+	log(`error writing to ${outconfigfile}`);
+	log(err);
+}).on('finish',function () {
+	log(`finished writing to ${outconfigfile}`);
+}).on('close',function () {
+	log(`closed stream for ${outconfigfile}`);
+});
+
 // our header for the csv file
 outstream.write(_.union(CSVHEADERS,TESTUNITS).join(",")+'\n');
 
@@ -952,7 +985,6 @@ async.waterfall([
 			}
 		});	
 	},
-
 	
 	// run all of our tests
 	
@@ -1012,6 +1044,25 @@ async.waterfall([
 		// save the results
 		log("sriov tests complete");
 		saveTestResults(results,cb);
+	},
+	function (cb) {
+		let device = _.keys(_.pickBy(activeDevs,{purpose:"source"}))[0];
+		getHostVersions(device,cb);
+	},
+	function (results,cb) {
+		// results is a single string; save it
+		totalVersions.push(results);
+		cb(null);
+	},
+	function (cb) {
+	// get our configs before destroying anything
+		let device = _.keys(_.pickBy(activeDevs,{purpose:"source"}))[0];
+		getVersions(device,activeTests,cb);
+	},
+	function (results,cb) {
+		// results is an array of config strings; save them
+		totalVersions.push.apply(totalVersions,results);
+		cb(null);
 	},
 	function (cb) {
 		if (keepItems) {
@@ -1083,8 +1134,15 @@ async.waterfall([
 	if (err) {
 		log(err);
 	}
-	let endTime = new Date().getTime(), duration = moment.duration(endTime-startTime);
-	log(`TEST END: ${new Date(endTime).toISOString()}`);
-	log(`TEST DURATION: ${duration.hours()}:${duration.minutes()}:${duration.seconds()}.${duration.milliseconds()}`);
+	let endTime = new Date().getTime(), duration = moment.duration(endTime-startTime),
+	endFormatted = new Date(endTime).toISOString(), durationFormatted = `${duration.hours()}:${duration.minutes()}:${duration.seconds()}.${duration.milliseconds()}`;
+	log(`TEST END: ${endFormatted}`);
+	log(`TEST DURATION: ${durationFormatted}}`);
+	
+	outconfig.write(totalVersions.join('\n')+'\n');
+	outconfig.write(`TEST START: ${new Date(startTime).toISOString()}\n`);
+	outconfig.write(`TEST END: ${endFormatted}\n`);
+	outconfig.write(`TEST DURATION: ${durationFormatted}\n`);
+	outconfig.end();
 });
 
