@@ -21,7 +21,8 @@ done
 
 
 # launch flannel on every host
-(flanneld --public-ip $PRIVATEMGMTIP --iface $PRIVATEMGMTIP &)
+# VERY IMPORTANT: do not lose stdout/stderr, or flannel sometimes dies. Go figure.
+(flanneld --public-ip $PRIVATEMGMTIP --iface $PRIVATEMGMTIP >/tmp/flannel.log 2>&1 &)
 
 # restart the docker engine with the right bip
 systemctl stop docker

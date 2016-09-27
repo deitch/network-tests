@@ -26,3 +26,6 @@ systemctl start docker
 ip ro | awk '/flannel/ {print $1,$2,$3}' | while read line; do 
 	ip ro del $line
 done
+
+# remove the old log
+rm -f /tmp/flannel.log
