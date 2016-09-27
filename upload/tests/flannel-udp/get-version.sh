@@ -2,5 +2,5 @@
 
 set -e
 
-echo Flannel: $(flanneld --version)
+echo Flannel: $(flanneld --version 2>&1)
 
