@@ -4,7 +4,8 @@ var fs = require('fs'), Packet = require('packet-nodejs'), async = require('asyn
 scp = require('scp2'), CIDR = require('cidr-js'), Addr = require('netaddr').Addr, mkdirp = require('mkdirp'),
 ssh = require('simple-ssh'), keypair = require('keypair'), forge = require('node-forge'), jsonfile = require('jsonfile'),
 moment = require('moment'),
-argv = require('minimist')(process.argv.slice(2)), outstream, outconfig;
+argv = require('minimist')(process.argv.slice(2)), outstream, outconfig,
+debugAll = false;
 
 // import the token from the file token
 const TOKEN = fs.readFileSync('token').toString().replace(/\n/,''), pkt = new Packet(TOKEN),
@@ -241,7 +242,7 @@ runCmd = function (host,cmds,callback) {
 	env = makeShellEnv(devices[host].env);
 	// add each cmd up
 	_.each(cmds,function (cmdset) {
-		let cmd = cmdset.cmd, msg = cmdset.msg, debug = cmdset.debug;
+		let cmd = cmdset.cmd, msg = cmdset.msg, debug = cmdset.debug || debugAll;
 		log(`${host}: ${cmd}`);
 		session.exec(`${env} ${cmd}`,{
 			exit: function (code,stdout,stderr) {
@@ -717,6 +718,8 @@ saveTestResults = function (results,cb) {
 if (argv.help || argv.h) {
 	Usage();
 }
+
+debugAll = argv.debug || false;
 
 log(`TEST START: ${new Date(startTime).toISOString()}`);
 
