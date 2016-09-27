@@ -17,7 +17,6 @@ PRIVATEMGMTIP=$1
 PEER=$2
 PEERNAME=$3
 
-# clean up anything old
 DATA_DIR=/var/lib/etcd/default.etcd
 CONF_FILE=/etc/etcd/etcd.conf
 
@@ -38,8 +37,5 @@ ETCD_INITIAL_CLUSTER_STATE="new"
 ETCD_ADVERTISE_CLIENT_URLS="http://$PRIVATEMGMTIP:2379"
 
 EOF
-
-# keep a clean backup copy
-cp $CONF_FILE $CONF_FILE.clean
 
 systemctl start etcd

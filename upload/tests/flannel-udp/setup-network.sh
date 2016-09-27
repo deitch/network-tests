@@ -14,7 +14,6 @@ firewall-cmd --zone=trusted --add-source=$IPRANGE
 
 etcdctl set /coreos.com/network/config '{ "Network": "'$IPRANGE'", "Backend":{"Type":"udp"} }'
 
-
 # remove any old routes
 ip ro | awk '/flannel/ {print $1,$2,$3}' | while read line; do 
 	ip ro del $line
@@ -28,17 +27,13 @@ done
 systemctl stop docker
 
 mkdir -p /etc/systemd/system/docker.service.d/
-OVERRIDE=/etc/systemd/system/docker.service.d/override.conf
+OVERRIDE=/etc/systemd/system/docker.service.d/99-flannel.conf
 
 cat > $OVERRIDE <<EOF
-[Unit]
-After=network.target docker.socket etcd.service
-Requires=etcd.service docker.socket
-
 [Service]
 EnvironmentFile=/run/flannel/subnet.env
 ExecStart=
-ExecStart=/usr/bin/docker daemon --cluster-store etcd://127.0.0.1:2379 --bip=\${FLANNEL_SUBNET} --mtu=\${FLANNEL_MTU}  -H fd://
+ExecStart=/usr/bin/docker daemon --cluster-store etcd://127.0.0.1:2379 --cluster-advertise $PRIVATEMGMTIP:0 --bip=\${FLANNEL_SUBNET} --mtu=\${FLANNEL_MTU}
 EOF
 
 systemctl daemon-reload

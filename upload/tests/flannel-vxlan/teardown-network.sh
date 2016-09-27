@@ -17,10 +17,7 @@ firewall-cmd --zone=trusted --remove-source=$IPRANGE || true
 # restart the docker engine with the right bip
 systemctl stop docker
 
-OVERRIDE=/etc/systemd/system/docker.service.d/override.conf
-if [[ -e $OVERRIDE.clean ]]; then
-	cp $OVERRIDE.clean $OVERRIDE
-fi
+rm -f /etc/systemd/system/docker.service.d/99-flannel.conf
 
 systemctl daemon-reload
 systemctl start docker
