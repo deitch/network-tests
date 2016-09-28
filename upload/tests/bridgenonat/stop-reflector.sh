@@ -2,5 +2,5 @@
 
 set -e
 
-docker stop netserver
+docker kill netserver
 docker rm netserver
