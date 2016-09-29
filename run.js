@@ -633,7 +633,7 @@ runTestSuite = function (tests,test,callback) {
 			initializeTests(tests,test,cb);
 		},
 		function (cb) {
-			getHostIps(allDevs,test,cb);
+			getHostIps(allDevs,test,testConfig,cb);
 		},
 		function (res,cb) {
 			assignIps(res,cb);
