@@ -136,8 +136,10 @@ As of this writing, the following tests are supported:
 When multiple tests are run, the following rules of order are followed:
 
 1. If the tests include `metal`, always run `metal` *first* to provide a baseline.
-2. If the tests include `sriov`, always run `sriov` *last*, as the teardown of SRIOV isn't always clean, and may require a reboot.
+2. If the tests include `sriov`, always run `sriov` *last*, as the teardown of SRIOV isn't clean, and requires a reboot.
 3. Run all other tests after `metal` and before `sriov` in order passed to `--test` command-line options, or if all tests are running, in alphabetical order.
+
+In other words, don't do anything too special after running `sriov`. It is the last test for a reason.
 
 ### How Tests Run
 
