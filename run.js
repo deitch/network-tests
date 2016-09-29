@@ -243,7 +243,7 @@ runCmd = function (host,cmds,callback) {
 	// add each cmd up
 	_.each(cmds,function (cmdset) {
 		let cmd = cmdset.cmd, msg = cmdset.msg, debug = cmdset.debug || debugAll;
-		log(`${host}: ${cmd}`);
+		log(`${host}: ${env} ${cmd}`);
 		session.exec(`${env} ${cmd}`,{
 			exit: function (code,stdout,stderr) {
 				if (debug) {
@@ -265,7 +265,8 @@ runCmd = function (host,cmds,callback) {
 		});
 	});
 	session.on('error',function (err) {
-		log(host+": ssh error connecting");
+		log(host+": ssh error connecting for cmds:");
+		log(cmds);
 		log(err);
 		errCode = true;
 		session.end();
@@ -366,17 +367,31 @@ startReflectors = function (targets,test,callback) {
 	});
 },
 
-getReflectorIp = function (targets,test,callback) {
+getReflectorIp = function (targets,test,config,callback) {
 	let ips = {};
+	config = config || {};
 	// now start the reflector on each
 	async.each(targets,function (target,cb) {
-		let cmd = `network-tests/tests/${test}/get-reflector-ip.sh`;
+		let cmd = `network-tests/tests/${test}/get-reflector-ip.sh`,
+		retry = config.retry || TIMEOUT_RETRY;
 
 		log(`${target}: getting reflector IP`);
 		log(`${target}: ${cmd}`);
-		runCmd(target,[{cmd:cmd,msg:"get netserver IP"}],function (err,data) {
+
+		async.retry(retry,function (cb) {
+			runCmd(target,[{cmd:cmd,msg:"get netserver IP"}],function (err,data) {
+				if (!data || data.match(/^\s*$/)) {
+					err = "empty netserver IP string";
+					log(`${target}: ${err}`);
+				}
+				cb(err,data);
+			});
+		},function (err,data) {
+			// we failed a given test the retry number of times, just move on
 			if (!err) {
 				let ip = data.replace(/\s+/g," ").replace(/(^\s+|\s+$)/,'').split(/\s/);
+				log(`${target}: retrieve netserver IP response: ${data}`);
+				log(`${target}: retrieve netserver IP filtered: ${ip}`);
 				ips[target] = {local:ip[0],remote:ip[1]};
 				log(`${target}: retrieved netserver IP local:${ips[target].local} remote:${ips[target].remote}`);
 			}
@@ -391,16 +406,26 @@ getReflectorIp = function (targets,test,callback) {
 	});
 },
 
-getHostIps = function (devs,test,callback) {
+getHostIps = function (devs,test,config,callback) {
 	let ips = {};
+	config = config || {};
 	if (fs.existsSync(`upload/tests/${test}/get-host-ip.sh`)) {
 		// now start the reflector on each
 		async.each(devs,function (target,cb) {
-			let cmd = `network-tests/tests/${test}/get-host-ip.sh`;
+			let cmd = `network-tests/tests/${test}/get-host-ip.sh`,
+			retry = config.retry || TIMEOUT_RETRY;
 			log(`${target}: getting host allocated IP`);
 			log(`${target}: ${cmd}`);
-
-			runCmd(target,[{cmd:cmd,msg:"get host used IPs"}],function (err,data) {
+			async.retry(retry,function (cb) {
+				runCmd(target,[{cmd:cmd,msg:"get netserver IP"}],function (err,data) {
+					if (!data || data.match(/^\s*$/)) {
+						err = "empty host IP string";
+						log(`${target}: ${err}`);
+					}
+					cb(err,data);
+				});
+			},function (err,data) {
+				// we failed a given test the retry number of times, just move on
 				if (!err) {
 					// the stdout response should be a space separated list of IPs. The first is for local, the second is for remote
 					ips[target] = data.replace(/\s+/g," ").replace(/(^\s+|\s+$)/,'').split(/\s/);
@@ -598,7 +623,7 @@ runTestSuite = function (tests,test,callback) {
 		},
 		function (res,cb) {
 			targetIds = res;
-			getReflectorIp(targets,test,cb);
+			getReflectorIp(targets,test,testConfig,cb);
 		},
 		function (res,cb) {
 			// add the IP for each one
