@@ -523,21 +523,16 @@ runTests = function (tests,targets,msgPrefix,config,callback) {
 getHostVersions = function (device,callback) {
 	runCmd(device,[{cmd:`network-tests/scripts/get-version.sh`,msg:"get-host-version"}],callback);
 },
-getVersions = function (device,tests,callback) {
-	async.map(tests,function (test,cb) {
-		let cmd = `tests/${test}/get-version.sh`;
-		if (fs.existsSync('./upload/'+cmd)) {
-			log("getting test version for: "+test);
+getTestVersion = function (device, test, callback) {
+	let cmd = `tests/${test}/get-version.sh`;
+	if (fs.existsSync('./upload/'+cmd)) {
+		log("getting test version for: "+test);
 
-			runCmd(device,[{cmd:`network-tests/${cmd}`,msg:"get-version"}],cb);
-		} else {
-			log("no version provided for: "+test);
-			cb(null,null);
-		}
-	},function (err,data) {
-		log("getting test versions complete");
-		callback(err,data);
-	});
+		runCmd(device,[{cmd:`network-tests/${cmd}`,msg:"get-version"}],callback);
+	} else {
+		log("no version provided for: "+test);
+		callback(null,null);
+	}
 },
 
 
@@ -553,7 +548,7 @@ runTestSuite = function (tests,test,callback) {
 	// need to start the reflector container on each target
 	
 	// find all of the targets
-	let targets = _.uniq(_.map(tests,"to")), allDevs = _.keys(activeDevs), targetIds = {}, allResults, testConfig;
+	let targets = _.uniq(_.map(tests,"to")), allDevs = _.keys(activeDevs), targetIds = {}, allResults, testConfig, version = "";
 	
 	// clear target env
 	_.each(allDevs,function (host) {
@@ -649,10 +644,19 @@ runTestSuite = function (tests,test,callback) {
 			stopReflectors(targetIds,test,cb);
 		},
 		function (cb) {
+			let device = targets[0];
+			getTestVersion(device,test,cb);
+		},
+		function (res,cb) {
+			// results is a config strings; save it
+			version = res;
+			cb(null);
+		},
+		function (cb) {
 			teardownNetwork(allDevs,test,cb);
 		}
 	],function (err) {
-		callback(err,allResults);
+		callback(err,{data:allResults,config:version});
 	});
 },
 
@@ -711,12 +715,21 @@ activeTests = argv.test ? _.uniq(_.reduce([].concat(argv.test),function (result,
 	return result;
 },[])) : TESTS,
 activeNetworks = _.uniq([].concat(argv.network || NETWORKS)),
-totalResults = [],
-totalVersions = [],
-saveTestResults = function (results,cb) {
+saveTestResults = function (results) {
+	if (results) {
+		saveTestData(results.data);
+		saveVersions(results.config);
+	}
+},
+saveVersions = function (version) {
+	// write the config out as well
+	if (version && !version.match(/^\s*$/)) {
+		outconfig.write(version+'\n');
+	}
+},
+saveTestData = function (results) {
 	// do we have an output file?
 	results = results || [];
-	totalResults.push.apply(totalResults,results);
 	// write the result line to outdatafile
 	// each line is the data, plus the results
 	if (results.length > 0) {
@@ -735,8 +748,7 @@ saveTestResults = function (results,cb) {
 			});
 			outstream.write(_.concat(fixedLine,dataLine).join(',')+'\n');
 		});
-	}
-	cb(null);
+	}	
 }
 ;
 
@@ -1014,6 +1026,17 @@ async.waterfall([
 		});	
 	},
 	
+	// get our host version info
+	function (cb) {
+		let device = _.keys(_.pickBy(activeDevs,{purpose:"source"}))[0];
+		getHostVersions(device,cb);
+	},
+	function (results,cb) {
+		// results is a single string; save it
+		saveVersions(results);
+		cb(null);
+	},
+	
 	// run all of our tests
 	
 	// first run our benchmark bare metal tests
@@ -1032,7 +1055,8 @@ async.waterfall([
 	function (results,cb) {
 		// save the results
 		log("metal tests complete");
-		saveTestResults(results,cb);
+		saveTestResults(results);
+		cb(null);
 	},
 	function (cb) {
 		// now run container tests - be sure to exclude metal
@@ -1041,13 +1065,14 @@ async.waterfall([
 			log("running container:"+test+" tests");
 			// make the list of what we will test
 			let tests = genTestList({protocols:activeProtocols,sizes:activeSizes,networks:activeNetworks,devices:activeDevs, test:test, port:NETSERVERPORT, reps: REPETITIONS});
-			runTestSuite(tests,test,function (err,data) {
+			runTestSuite(tests,test,function (err,results) {
 				if(err) {
 					log("container:"+test+" errors");
 					cb(err);
 				} else {
 					log("container:"+test+" complete");
-					saveTestResults(data,cb);
+					saveTestResults(results);
+					cb(null);
 				}
 			});
 		},function (err) {
@@ -1071,25 +1096,7 @@ async.waterfall([
 	function (results,cb) {
 		// save the results
 		log("sriov tests complete");
-		saveTestResults(results,cb);
-	},
-	function (cb) {
-		let device = _.keys(_.pickBy(activeDevs,{purpose:"source"}))[0];
-		getHostVersions(device,cb);
-	},
-	function (results,cb) {
-		// results is a single string; save it
-		totalVersions.push(results);
-		cb(null);
-	},
-	function (cb) {
-	// get our configs before destroying anything
-		let device = _.keys(_.pickBy(activeDevs,{purpose:"source"}))[0];
-		getVersions(device,activeTests,cb);
-	},
-	function (results,cb) {
-		// results is an array of config strings; save them
-		totalVersions.push.apply(totalVersions,results);
+		saveTestResults(results);
 		cb(null);
 	},
 	function (cb) {
@@ -1167,7 +1174,6 @@ async.waterfall([
 	log(`TEST END: ${endFormatted}`);
 	log(`TEST DURATION: ${durationFormatted}}`);
 	
-	outconfig.write(totalVersions.join('\n')+'\n');
 	outconfig.write(`TEST START: ${new Date(startTime).toISOString()}\n`);
 	outconfig.write(`TEST END: ${endFormatted}\n`);
 	outconfig.write(`TEST DURATION: ${durationFormatted}\n`);
